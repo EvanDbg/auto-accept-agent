@@ -18,6 +18,7 @@ function getSettingsPanel() {
 const GLOBAL_STATE_KEY = 'auto-accept-enabled-global';
 const PRO_STATE_KEY = 'auto-accept-isPro';
 const FREQ_STATE_KEY = 'auto-accept-frequency';
+const LICENSE_API = 'https://auto-accept-backend.onrender.com/api';
 // Locking
 const LOCK_KEY = 'auto-accept-instance-lock';
 const HEARTBEAT_KEY = 'auto-accept-instance-heartbeat';
@@ -28,16 +29,23 @@ let isPro = false;
 let isLockedOut = false; // Local tracking
 let pollFrequency = 2000; // Default for Free
 
+// Background Mode state
+let backgroundModeEnabled = false;
+const BACKGROUND_DONT_SHOW_KEY = 'auto-accept-background-dont-show';
+const BACKGROUND_MODE_KEY = 'auto-accept-background-mode';
+const VERSION_5_0_KEY = 'auto-accept-version-5.0-notification-shown';
+
 let pollTimer;
 let statusBarItem;
 let statusSettingsItem;
+let statusBackgroundItem; // New: Background Mode toggle
 let outputChannel;
 let currentIDE = 'unknown'; // 'cursor' | 'antigravity'
 let globalContext;
 
-// Handlers
-let cursorCDP;
-let cursorLauncher;
+// Handlers (used by both IDEs now)
+let cdpHandler;
+let relauncher;
 
 function log(message) {
     try {
@@ -84,6 +92,14 @@ async function activate(context) {
         context.subscriptions.push(statusSettingsItem);
         statusSettingsItem.show();
 
+        // Background Mode status bar item
+        statusBackgroundItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 98);
+        statusBackgroundItem.command = 'auto-accept.toggleBackground';
+        statusBackgroundItem.text = '$(globe) Background: OFF';
+        statusBackgroundItem.tooltip = 'Background Auto-Accept (Pro)';
+        context.subscriptions.push(statusBackgroundItem);
+        // Don't show by default - only when Auto Accept is ON
+
         console.log('Auto Accept: Status bar items created and shown.');
     } catch (sbError) {
         console.error('CRITICAL: Failed to create status bar items:', sbError);
@@ -92,7 +108,7 @@ async function activate(context) {
     try {
         // 1. Initialize State
         isEnabled = context.globalState.get(GLOBAL_STATE_KEY, false);
-        isPro = false; // context.globalState.get(PRO_STATE_KEY, false); // SIMULATION: Forced Free Plan
+        isPro = context.globalState.get(PRO_STATE_KEY, false);
 
         // Load frequency
         if (isPro) {
@@ -100,6 +116,32 @@ async function activate(context) {
         } else {
             pollFrequency = 300; // Enforce fast polling (0.3s) for free users
         }
+
+        // Load background mode state
+        backgroundModeEnabled = context.globalState.get(BACKGROUND_MODE_KEY, false);
+
+
+        // 1.5 Verify License Background Check
+        verifyLicense(context).then(isValid => {
+            if (isPro !== isValid) {
+                isPro = isValid;
+                context.globalState.update(PRO_STATE_KEY, isValid);
+                log(`License re-verification: Updated Pro status to ${isValid}`);
+
+                if (cdpHandler && cdpHandler.setProStatus) {
+                    cdpHandler.setProStatus(isValid);
+                }
+
+                if (!isValid) {
+                    pollFrequency = 300; // Downgrade speed
+                    if (backgroundModeEnabled) {
+                        // Optional: Disable background mode visual toggle if desired, 
+                        // but logic gate handles it.
+                    }
+                }
+                updateStatusBar();
+            }
+        });
 
         currentIDE = detectIDE();
 
@@ -110,24 +152,20 @@ async function activate(context) {
         log(`Auto Accept: Activating...`);
         log(`Auto Accept: Detected environment: ${currentIDE.toUpperCase()}`);
 
-        // 3. Initialize Handlers based on IDE (Lazy Load)
-        if (currentIDE === 'cursor') {
-            try {
-                // Lazy load dependencies to prevent top-level crashes
-                const { CursorCDPHandler } = require('./main_scripts/cursor-cdp');
-                const { CursorLauncher, BASE_CDP_PORT } = require('./main_scripts/cursor-launcher');
+        // 3. Initialize Handlers (Lazy Load) - Both IDEs use CDP now
+        try {
+            const { CDPHandler } = require('./main_scripts/cdp-handler');
+            const { Relauncher, BASE_CDP_PORT } = require('./main_scripts/relauncher');
 
-                cursorCDP = new CursorCDPHandler(BASE_CDP_PORT, BASE_CDP_PORT + 10, log);
-                // Set Pro status on CDP handler
-                if (cursorCDP.setProStatus) {
-                    cursorCDP.setProStatus(isPro);
-                }
-                cursorLauncher = new CursorLauncher(log);
-                log('Cursor handlers initialized.');
-            } catch (err) {
-                log(`Failed to initialize Cursor handlers: ${err.message}`);
-                vscode.window.showErrorMessage(`Auto Accept Error: Failed to load Cursor scripts. ${err.message}`);
+            cdpHandler = new CDPHandler(BASE_CDP_PORT, BASE_CDP_PORT + 10, log);
+            if (cdpHandler.setProStatus) {
+                cdpHandler.setProStatus(isPro);
             }
+            relauncher = new Relauncher(log);
+            log(`CDP handlers initialized for ${currentIDE}.`);
+        } catch (err) {
+            log(`Failed to initialize CDP handlers: ${err.message}`);
+            vscode.window.showErrorMessage(`Auto Accept Error: ${err.message}`);
         }
 
         // 4. Update Status Bar (already created at start)
@@ -139,6 +177,7 @@ async function activate(context) {
             vscode.commands.registerCommand('auto-accept.toggle', () => handleToggle(context)),
             vscode.commands.registerCommand('auto-accept.relaunch', () => handleRelaunch()),
             vscode.commands.registerCommand('auto-accept.updateFrequency', (freq) => handleFrequencyUpdate(context, freq)),
+            vscode.commands.registerCommand('auto-accept.toggleBackground', () => handleBackgroundToggle(context)),
             vscode.commands.registerCommand('auto-accept.openSettings', () => {
                 const panel = getSettingsPanel();
                 if (panel) {
@@ -156,6 +195,9 @@ async function activate(context) {
             log(`Error in environment check: ${err.message}`);
         }
 
+        // 7. Show Version 5.0 Notification (Once)
+        showVersionNotification(context);
+
         log('Auto Accept: Activation complete');
     } catch (error) {
         console.error('ACTIVATION CRITICAL FAILURE:', error);
@@ -165,19 +207,19 @@ async function activate(context) {
 }
 
 async function ensureCDPOrPrompt(showPrompt = false) {
-    if (currentIDE !== 'cursor' || !cursorCDP) return;
+    if (!cdpHandler) return;
 
-    const cdpAvailable = await cursorCDP.isCDPAvailable();
+    const cdpAvailable = await cdpHandler.isCDPAvailable();
     log(`Environment check: CDP Available = ${cdpAvailable}`);
 
     if (cdpAvailable) {
-        await cursorCDP.start();
+        await cdpHandler.start();
     } else {
         log('CDP not available.');
         // Only show the relaunch dialog if explicitly requested (user action)
-        if (showPrompt && cursorLauncher) {
+        if (showPrompt && relauncher) {
             log('Prompting user for relaunch...');
-            await cursorLauncher.showLaunchPrompt();
+            await relauncher.showRelaunchPrompt();
         } else {
             log('Skipping relaunch prompt (startup). User can click status bar to trigger.');
         }
@@ -186,55 +228,117 @@ async function ensureCDPOrPrompt(showPrompt = false) {
 
 async function checkEnvironmentAndStart() {
     if (isEnabled) {
-        if (currentIDE === 'cursor') {
-            // Don't show prompt on activation - silent check only
-            await ensureCDPOrPrompt(false);
-        }
+        // Both IDEs now use CDP - silent check on startup
+        await ensureCDPOrPrompt(false);
         startPolling();
     }
     updateStatusBar();
 }
 
 async function handleToggle(context) {
+    log('=== handleToggle CALLED ===');
+    log(`  Previous isEnabled: ${isEnabled}`);
+
     try {
         isEnabled = !isEnabled;
+        log(`  New isEnabled: ${isEnabled}`);
+
         await context.globalState.update(GLOBAL_STATE_KEY, isEnabled);
+        log(`  GlobalState updated`);
 
         if (isEnabled) {
             log('Auto Accept: Enabled');
-            if (currentIDE === 'cursor') {
-                // Show prompt when user explicitly enables
-                await ensureCDPOrPrompt(true);
-            }
+            // Show relaunch prompt when user enables (if CDP not available)
+            await ensureCDPOrPrompt(true);
             startPolling();
         } else {
             log('Auto Accept: Disabled');
             stopPolling();
-            if (cursorCDP) await cursorCDP.stop();
+            if (cdpHandler) await cdpHandler.stop();
         }
 
+        log('  Calling updateStatusBar...');
         updateStatusBar();
+        log('=== handleToggle COMPLETE ===');
     } catch (e) {
         log(`Error toggling: ${e.message}`);
+        log(`Error stack: ${e.stack}`);
     }
 }
 
 async function handleRelaunch() {
-    if (currentIDE !== 'cursor') {
-        vscode.window.showInformationMessage('Relaunch is only available in Cursor.');
-        return;
-    }
-
-    if (!cursorLauncher) {
-        vscode.window.showErrorMessage('Cursor Launcher not initialized.');
+    if (!relauncher) {
+        vscode.window.showErrorMessage('Relauncher not initialized.');
         return;
     }
 
     log('Initiating Relaunch...');
-    const result = await cursorLauncher.launchAndReplace();
+    const result = await relauncher.relaunchWithCDP();
     if (!result.success) {
-        vscode.window.showErrorMessage(`Relaunch failed: ${result.error}`);
+        vscode.window.showErrorMessage(`Relaunch failed: ${result.message}`);
     }
+}
+
+async function handleBackgroundToggle(context) {
+    log('Background toggle clicked');
+
+    // Free tier: Show Pro message
+    if (!isPro) {
+        vscode.window.showInformationMessage(
+            'Background Auto-Accept is a Pro feature.',
+            'Learn More'
+        ).then(choice => {
+            if (choice === 'Learn More') {
+                const panel = getSettingsPanel();
+                if (panel) panel.createOrShow(context.extensionUri, context);
+            }
+        });
+        return;
+    }
+
+    // Pro tier: Check if we should show first-time dialog
+    const dontShowAgain = context.globalState.get(BACKGROUND_DONT_SHOW_KEY, false);
+
+    if (!dontShowAgain && !backgroundModeEnabled) {
+        // First-time enabling: Show confirmation dialog
+        const choice = await vscode.window.showInformationMessage(
+            'Enable Background Auto-Accept?\n\n' +
+            'This allows Auto Accept Agent to temporarily switch between conversation tabs ' +
+            'to accept pending actions in the background.\n\n' +
+            'You may see brief focus changes while it runs.',
+            { modal: true },
+            'Enable',
+            "Don't Show Again & Enable",
+            'Cancel'
+        );
+
+        if (choice === 'Cancel' || !choice) {
+            log('Background mode cancelled by user');
+            return;
+        }
+
+        if (choice === "Don't Show Again & Enable") {
+            await context.globalState.update(BACKGROUND_DONT_SHOW_KEY, true);
+            log('Background mode: Dont show again set');
+        }
+
+        // Enable it
+        backgroundModeEnabled = true;
+        await context.globalState.update(BACKGROUND_MODE_KEY, true);
+        log('Background mode enabled');
+    } else {
+        // Simple toggle
+        backgroundModeEnabled = !backgroundModeEnabled;
+        await context.globalState.update(BACKGROUND_MODE_KEY, backgroundModeEnabled);
+        log(`Background mode toggled: ${backgroundModeEnabled}`);
+
+        // Hide overlay if background mode is being disabled
+        if (!backgroundModeEnabled && cdpHandler) {
+            await cdpHandler.hideBackgroundOverlay();
+        }
+    }
+
+    updateStatusBar();
 }
 
 let agentState = 'running'; // 'running' | 'stalled' | 'recovering' | 'recovered'
@@ -268,87 +372,26 @@ function startPolling() {
             }
         }
 
-        // --- Core Loop with State Machine ---
-
-        let stuckInfo = { state: 'running' };
-
-        if (currentIDE === 'cursor' && cursorCDP) {
-            stuckInfo = await cursorCDP.getStuckState(isEnabled);
+        // --- Core Loop (Simplified) ---
+        // Just execute accept - no stalled/stuck detection logic
+        if (agentState !== 'running') {
+            agentState = 'running';
+            updateStatusBar();
         }
 
-        // If CDP says we are running, or we are not in Cursor, we are 'running'
-        // (Unless we successfully recovered recently, then we stay 'recovered' for a bit visually?)
-        // For simplicity, if CDP says running, we reset to running unless we are mid-recovery.
-
-        if (stuckInfo.state === 'running') {
-            if (agentState !== 'running' && agentState !== 'recovered') {
-                log('State transition: ' + agentState + ' -> running');
-                agentState = 'running';
-                retryCount = 0;
-                updateStatusBar();
-            }
-            // Standard execution
+        if (cdpHandler && cdpHandler.isEnabled) {
             await executeAccept();
-        }
-        else if (stuckInfo.state === 'stalled') {
-            if (agentState === 'running' || agentState === 'recovered') {
-                log(`State transition: ${agentState} -> stalled (Reason: ${stuckInfo.reason})`);
-                agentState = 'stalled';
-                updateStatusBar();
-            }
-
-            // Handle Stalled State
-            if (!isPro) {
-                // Free Tier: Do nothing automatically.
-                // Status bar already updated to "Waiting..."
-                log('Stalled (Free Tier) - Checking trigger conditions...');
-
-                // Smart Trigger Logic for Upgrade Prompt
-                if (!hasSeenUpgradeModal) {
-                    const lastDismissedAt = globalContext.globalState.get('auto-accept-lastDismissedAt', 0);
-                    const now = Date.now();
-                    const COOLDOWN_MS = 24 * 60 * 60 * 1000; // 24 hours
-
-                    if (now - lastDismissedAt > COOLDOWN_MS) {
-                        log('Triggering Upgrade Prompt (Eligible: Session=First, Cooldown=Passed)');
-                        hasSeenUpgradeModal = true;
-
-                        const panelClass = getSettingsPanel();
-                        if (panelClass) {
-                            panelClass.showUpgradePrompt(globalContext);
-                        }
-                    } else {
-                        log(`Upgrade Prompt suppressed (Cooldown active - ${(COOLDOWN_MS - (now - lastDismissedAt)) / 1000}s remaining)`);
-                        // Mark as seen so we don't log this every poll? 
-                        // No, we might want to log it sparingly, but polling is slow (3s?).
-                        // Let's set hasSeenUpgradeModal = true to avoid checking global state constantly this session?
-                        // "Current session has NOT shown modal" - technically we haven't shown it.
-                        // But if we are in cooldown, we effectively "skipping" this session's chance.
-                        // Let's set it to true to stop checking.
-                        hasSeenUpgradeModal = true;
-                    }
-                }
-            } else {
-                // Pro Tier: Recovery Logic
-                if (retryCount < MAX_RETRIES) {
-                    agentState = 'recovering';
-                    retryCount++;
-                    log(`State transition: stalled -> recovering (Attempt ${retryCount}/${MAX_RETRIES})`);
-                    updateStatusBar();
-
-                    await handleRecovery(retryCount);
-                } else {
-                    // Exhausted retries
-                    if (agentState !== 'stalled') {
-                        agentState = 'stalled'; // Permanent stall until user interaction
-                        log('Recovery failed. Max retries reached.');
-                        updateStatusBar();
-                    }
-                }
-            }
         }
 
     }, pollFrequency);
+}
+
+function stopPolling() {
+    if (pollTimer) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+    }
+    log('Auto Accept: Polling stopped');
 }
 
 async function handleRecovery(attempt) {
@@ -358,21 +401,13 @@ async function handleRecovery(attempt) {
 
     try {
         if (attempt === 1) {
-            // Strategy 1: Standard click, but maybe force = true?
-            // The default executeAccept(true) is already "force" in a way (background allowed).
-            // We just try again immediately.
-            await cursorCDP.executeAccept(true);
+            await cdpHandler.executeAccept(true);
         } else if (attempt === 2) {
             // Strategy 2: Re-query / Force fresh selectors
-            // In our CDP script, findAcceptButtons re-runs every time, so it IS fresh.
-            // But maybe we can restart the observer?
-            // For now, we just try executeAccept again, CDP script handles dynamic DOM.
-            await cursorCDP.executeAccept(true);
+            await cdpHandler.executeAccept(true);
         } else if (attempt === 3) {
-            // Strategy 3: Focus refresh simulation?
-            // This is harder via CDP without bringing window to front.
-            // We'll trust the script's "Enter key" logic which is part of clickButton.
-            await cursorCDP.executeAccept(true);
+            // Strategy 3: Focus refresh simulation
+            await cdpHandler.executeAccept(true);
         }
 
         // Check if we succeeded? 
@@ -385,35 +420,26 @@ async function handleRecovery(attempt) {
 }
 
 async function executeAccept() {
-    if (currentIDE === 'cursor') {
-        // Cursor Logic: CDP
-        if (cursorCDP && cursorCDP.isEnabled) {
-            try {
-                // Pass 'true' for allowHidden only if Pro? 
-                // Actually existing logic allowed background if connected.
-                // We'll keep it consistent: Pro checks are done in cursor-cdp.js connection gating usually?
-                // Actually extension.js didn't gate background exec before, only connection count.
-                // Let's allow it.
-                const res = await cursorCDP.executeAccept(true);
-
-                // If we clicked something, and we were recovering, we are now recovered!
-                if (res.executed > 0 && agentState === 'recovering') {
-                    agentState = 'recovered';
-                    log('State transition: recovering -> recovered');
-                    updateStatusBar();
-                }
-            } catch (e) {
-                log(`Cursor CDP execution error: ${e.message}`);
-            }
-        }
-    } else {
-        // Antigravity Logic
+    // Both IDEs use CDP - routing is handled internally
+    if (cdpHandler && cdpHandler.isEnabled) {
         try {
-            await vscode.commands.executeCommand('antigravity.agent.acceptAgentStep').then(
-                () => { },
-                (err) => { }
-            );
-        } catch (e) { }
+            // Pass backgroundModeEnabled && isPro to enable background mode
+            // cdp-handler routes to appropriate polling function:
+            //   - acceptPoll() for foreground mode
+            //   - cursorBackgroundPoll() for Cursor background (Pro)
+            //   - antigravityBackgroundPoll() for Antigravity background (Pro + tab cycling)
+            const allowBackground = backgroundModeEnabled && isPro;
+            const res = await cdpHandler.executeAccept(allowBackground);
+
+            // If we clicked something and we were recovering, we are now recovered!
+            if (res.executed > 0 && agentState === 'recovering') {
+                agentState = 'recovered';
+                log('State transition: recovering -> recovered');
+                updateStatusBar();
+            }
+        } catch (e) {
+            log(`CDP execution error: ${e.message}`);
+        }
     }
 }
 
@@ -425,23 +451,22 @@ function updateStatusBar() {
         let tooltip = `Auto Accept is running (${currentIDE} mode).`;
         let bgColor = undefined;
 
-        if (currentIDE === 'cursor') {
-            if (agentState === 'running') {
-                statusText = 'ON';
-                if (cursorCDP && cursorCDP.getConnectionCount() > 0) statusText += ' (Background)';
-            } else if (agentState === 'stalled') {
-                statusText = 'WAITING';
-                tooltip = isPro ? 'Agent stalled. Max retries reached.' : 'Agent waiting — built-in rules failed';
-                bgColor = new vscode.ThemeColor('statusBarItem.warningBackground');
-            } else if (agentState === 'recovering') {
-                statusText = 'RECOVERING...';
-                tooltip = `Attempting recovery (${retryCount}/${MAX_RETRIES})`;
-                bgColor = new vscode.ThemeColor('statusBarItem.warningBackground');
-            } else if (agentState === 'recovered') {
-                statusText = `RECOVERED (${retryCount})`;
-                tooltip = `Auto-recovered after ${retryCount} retries.`;
-                bgColor = new vscode.ThemeColor('statusBarItem.errorBackground'); // Make it pop? Or Success color if possible? VS Code only has error/warning.
-            }
+        // State-based status (both IDEs now use CDP state machine)
+        if (agentState === 'running') {
+            statusText = 'ON';
+            if (cdpHandler && cdpHandler.getConnectionCount() > 0) statusText += ' (CDP)';
+        } else if (agentState === 'stalled') {
+            statusText = 'WAITING';
+            tooltip = isPro ? 'Agent stalled. Max retries reached.' : 'Agent waiting — built-in rules failed';
+            bgColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+        } else if (agentState === 'recovering') {
+            statusText = 'RECOVERING...';
+            tooltip = `Attempting recovery (${retryCount}/${MAX_RETRIES})`;
+            bgColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+        } else if (agentState === 'recovered') {
+            statusText = `RECOVERED (${retryCount})`;
+            tooltip = `Auto-recovered after ${retryCount} retries.`;
+            bgColor = new vscode.ThemeColor('statusBarItem.errorBackground');
         }
 
         if (isLockedOut) {
@@ -453,10 +478,29 @@ function updateStatusBar() {
         statusBarItem.tooltip = tooltip;
         statusBarItem.backgroundColor = bgColor;
 
+        // Show Background Mode toggle when Auto Accept is ON
+        if (statusBackgroundItem) {
+            if (backgroundModeEnabled) {
+                statusBackgroundItem.text = '$(sync~spin) Background: ON';
+                statusBackgroundItem.tooltip = 'Background Auto-Accept is active. Click to disable.';
+                statusBackgroundItem.backgroundColor = undefined;
+            } else {
+                statusBackgroundItem.text = '$(globe) Background: OFF';
+                statusBackgroundItem.tooltip = 'Click to enable Background Auto-Accept (cycles through conversation tabs).';
+                statusBackgroundItem.backgroundColor = undefined;
+            }
+            statusBackgroundItem.show();
+        }
+
     } else {
         statusBarItem.text = '$(circle-slash) Auto Accept: OFF';
         statusBarItem.tooltip = 'Click to enable Auto Accept.';
         statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+
+        // Hide Background Mode toggle when Auto Accept is OFF
+        if (statusBackgroundItem) {
+            statusBackgroundItem.hide();
+        }
     }
 }
 
@@ -486,10 +530,56 @@ async function checkInstanceLock() {
     return false;
 }
 
+async function verifyLicense(context) {
+    const userId = context.globalState.get('auto-accept-userId');
+    if (!userId) return false;
+
+    return new Promise((resolve) => {
+        const https = require('https');
+        https.get(`${LICENSE_API}/check-license?userId=${userId}`, (res) => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => {
+                try {
+                    const json = JSON.parse(data);
+                    resolve(json.isPro === true);
+                } catch (e) {
+                    resolve(false);
+                }
+            });
+        }).on('error', () => resolve(false));
+    });
+}
+
+async function showVersionNotification(context) {
+    const hasShown = context.globalState.get(VERSION_5_0_KEY, false);
+    if (hasShown) return;
+
+    // specific copy for 5.0
+    const title = "What’s new in Auto Accept Agent 5.0";
+    const body = "Auto Accept can now accept agent actions in background conversations, so you don’t have to keep each tab open.\n\nPro users can enable Background Auto-Accept to keep multiple agents moving while they focus elsewhere.";
+    const btnEnable = "Enable Background Mode";
+    const btnGotIt = "Got it";
+
+    // Mark as shown immediately to prevent loops/multiple showings
+    await context.globalState.update(VERSION_5_0_KEY, true);
+
+    const selection = await vscode.window.showInformationMessage(
+        `${title}\n\n${body}`,
+        { modal: true }, // Using modal to ensure visibility as requested ("visible to users")
+        btnGotIt,
+        btnEnable
+    );
+
+    if (selection === btnEnable) {
+        handleBackgroundToggle(context);
+    }
+}
+
 function deactivate() {
     stopPolling();
-    if (cursorCDP) {
-        cursorCDP.stop();
+    if (cdpHandler) {
+        cdpHandler.stop();
     }
 }
 
