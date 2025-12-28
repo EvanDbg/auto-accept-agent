@@ -41,7 +41,11 @@ class CDPHandler {
 
     async scanForInstances() {
         const instances = [];
-        for (let port = this.startPort; port <= this.endPort; port++) {
+        const portsToScan = [];
+        for (let p = this.startPort; p <= this.endPort; p++) portsToScan.push(p);
+        if (!portsToScan.includes(9222)) portsToScan.push(9222);
+
+        for (const port of portsToScan) {
             try {
                 const pages = await this.getPages(port);
                 if (pages.length > 0) instances.push({ port, pages });

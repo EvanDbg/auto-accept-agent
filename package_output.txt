@@ -1,0 +1,75 @@
+﻿Executing prepublish script 'npm run vscode:prepublish'...
+
+> auto-accept-agent@7.2.1-override vscode:prepublish
+> npm run compile
+
+
+> auto-accept-agent@7.2.1-override compile
+> esbuild extension.js --bundle --outfile=dist/extension.js --external:vscode --platform=node --format=cjs
+
+node.exe : 
+At line:1 char:1
++ & "C:\Program 
+Files\nodejs/node.exe" 
+"C:\Program 
+Files\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~
+    + CategoryInfo          
+    : NotSpecified: (:Stri  
+  ng) [], RemoteException
+    + FullyQualifiedErrorId 
+    : NativeCommandError
+ 
+  dist\extension.js  210.7kb
+
+Done in 13ms
+ WARNING  Neither a 
+.vscodeignore file nor a 
+"files" property in 
+package.json was found. To 
+ensure only necessary files 
+are included in your 
+extension, add a 
+.vscodeignore file or 
+specify the "files" 
+property in package.json. 
+More info: https://aka.ms/vs
+code-vscodeignore
+
+ INFO  Files included in the VSIX:
+auto-accept-agent-7.2.1-override.vsix
+Ôö£ÔöÇ [Content_Types].xml 
+Ôö£ÔöÇ extension.vsixmanifest 
+ÔööÔöÇ extension/
+   Ôö£ÔöÇ .env [0.05 KB]
+   Ôö£ÔöÇ .gitignore [0 KB]
+   Ôö£ÔöÇ LICENSE.md [1.05 KB]
+   Ôö£ÔöÇ compile_output.txt [0.53 KB]
+   Ôö£ÔöÇ config.js [0.18 KB]
+   Ôö£ÔöÇ extension.js [31.44 KB]
+   Ôö£ÔöÇ ovsx_output.txt [0.06 KB]
+   Ôö£ÔöÇ package.json [1.65 KB]
+   Ôö£ÔöÇ package_output.txt [0.95 KB]
+   Ôö£ÔöÇ publish_output.txt [2.04 KB]
+   Ôö£ÔöÇ readme.md [1.97 KB]
+   Ôö£ÔöÇ settings-panel.js [29.21 KB]
+   Ôö£ÔöÇ .agent/ (1 file) [2.16 KB]
+   Ôö£ÔöÇ dist/ (1 file) [210.71 KB]
+   Ôö£ÔöÇ main_scripts/ (18 files) [138.86 KB]
+   Ôö£ÔöÇ media/ (3 files) [172.66 KB]
+   Ôö£ÔöÇ node_modules/ (19 files) [143.87 KB]
+   ÔööÔöÇ test_scripts/ (12 files) [134.11 KB]
+
+=> Run vsce ls --tree to see all included files.
+
+ ERROR  .env files should 
+not be packaged. Ignore the 
+file in your .vscodeignore 
+or exclude it from the 
+package.json files property.
+To ignore this check, you 
+can use 
+--allow-package-env-file 
+(not recommended).

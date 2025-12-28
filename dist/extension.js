@@ -20,7 +20,7 @@ var require_settings_panel = __commonJS({
   "settings-panel.js"(exports2, module2) {
     var vscode2 = require("vscode");
     var { STRIPE_LINKS } = require_config();
-    var LICENSE_API2 = "https://auto-accept-backend.onrender.com/api";
+    var LICENSE_API = "https://auto-accept-backend.onrender.com/api";
     var SettingsPanel2 = class _SettingsPanel {
       static currentPanel = void 0;
       static viewType = "autoAcceptSettings";
@@ -653,7 +653,7 @@ var require_settings_panel = __commonJS({
       async checkProStatus(userId) {
         return new Promise((resolve) => {
           const https = require("https");
-          https.get(`${LICENSE_API2}/verify?userId=${userId}`, (res) => {
+          https.get(`${LICENSE_API}/verify?userId=${userId}`, (res) => {
             let data = "";
             res.on("data", (chunk) => data += chunk);
             res.on("end", () => {
@@ -4355,7 +4355,10 @@ var require_cdp_handler = __commonJS({
       }
       async scanForInstances() {
         const instances = [];
-        for (let port = this.startPort; port <= this.endPort; port++) {
+        const portsToScan = [];
+        for (let p = this.startPort; p <= this.endPort; p++) portsToScan.push(p);
+        if (!portsToScan.includes(9222)) portsToScan.push(9222);
+        for (const port of portsToScan) {
           try {
             const pages = await this.getPages(port);
             if (pages.length > 0) instances.push({ port, pages });
@@ -4628,6 +4631,7 @@ var require_relauncher = __commonJS({
     var fs = require("fs");
     var path2 = require("path");
     var BASE_CDP_PORT = 9e3;
+    var ALTERNATE_CDP_PORT = 9222;
     var CDP_FLAG = `--remote-debugging-port=${BASE_CDP_PORT}`;
     var Relauncher = class {
       constructor(logger = null) {
@@ -4651,17 +4655,25 @@ var require_relauncher = __commonJS({
         this.log(msg);
       }
       // check if cdp is already running
-      async isCDPRunning(port = BASE_CDP_PORT) {
-        return new Promise((resolve) => {
-          const req = http.get(`http://127.0.0.1:${port}/json/version`, (res) => {
-            resolve(res.statusCode === 200);
+      async isCDPRunning() {
+        const ports = [BASE_CDP_PORT, ALTERNATE_CDP_PORT];
+        for (const port of ports) {
+          const running = await new Promise((resolve) => {
+            const req = http.get(`http://127.0.0.1:${port}/json/version`, (res) => {
+              resolve(res.statusCode === 200);
+            });
+            req.on("error", () => resolve(false));
+            req.setTimeout(1e3, () => {
+              req.destroy();
+              resolve(false);
+            });
           });
-          req.on("error", () => resolve(false));
-          req.setTimeout(2e3, () => {
-            req.destroy();
-            resolve(false);
-          });
-        });
+          if (running) {
+            this.log(`CDP found running on port ${port}`);
+            return true;
+          }
+        }
+        return false;
       }
       // find shortcut for this ide
       // handles windows mac and linux
@@ -4684,24 +4696,37 @@ var require_relauncher = __commonJS({
       }
       async _findWindowsShortcuts(ideName) {
         const shortcuts = [];
-        const possiblePaths = [
-          // Start Menu (most reliable)
-          path2.join(process.env.APPDATA || "", "Microsoft", "Windows", "Start Menu", "Programs", ideName, `${ideName}.lnk`),
-          // Desktop
-          path2.join(process.env.USERPROFILE || "", "Desktop", `${ideName}.lnk`),
-          // Taskbar (Windows 10+)
-          path2.join(process.env.APPDATA || "", "Microsoft", "Internet Explorer", "Quick Launch", "User Pinned", "TaskBar", `${ideName}.lnk`)
+        const searchDirs = [
+          path2.join(process.env.APPDATA || "", "Microsoft", "Windows", "Start Menu", "Programs"),
+          path2.join(process.env.USERPROFILE || "", "Desktop"),
+          path2.join(process.env.APPDATA || "", "Microsoft", "Internet Explorer", "Quick Launch", "User Pinned", "TaskBar")
         ];
-        for (const shortcutPath of possiblePaths) {
-          if (fs.existsSync(shortcutPath)) {
-            const info = await this._readWindowsShortcut(shortcutPath);
-            shortcuts.push({
-              path: shortcutPath,
-              hasFlag: info.hasFlag,
-              type: shortcutPath.includes("Start Menu") ? "startmenu" : shortcutPath.includes("Desktop") ? "desktop" : "taskbar",
-              args: info.args,
-              target: info.target
-            });
+        const nameVariants = [ideName];
+        if (ideName === "Code") nameVariants.push("Visual Studio Code");
+        if (ideName === "Antigravity") nameVariants.push("Antigravity CDP");
+        for (const dir of searchDirs) {
+          if (!fs.existsSync(dir)) continue;
+          try {
+            const files = fs.readdirSync(dir);
+            for (const file of files) {
+              if (file.endsWith(".lnk")) {
+                const lowerFile = file.toLowerCase();
+                const isMatch = nameVariants.some((v) => lowerFile.includes(v.toLowerCase()));
+                if (isMatch) {
+                  const shortcutPath = path2.join(dir, file);
+                  const info = await this._readWindowsShortcut(shortcutPath);
+                  shortcuts.push({
+                    path: shortcutPath,
+                    hasFlag: info.hasFlag,
+                    type: dir.includes("Start Menu") ? "startmenu" : dir.includes("Desktop") ? "desktop" : "taskbar",
+                    args: info.args,
+                    target: info.target
+                  });
+                }
+              }
+            }
+          } catch (e) {
+            this.log(`Error searching directory ${dir}: ${e.message}`);
           }
         }
         this.log(`Found ${shortcuts.length} Windows shortcuts`);
@@ -4879,6 +4904,78 @@ try {
           this.log(`Error modifying shortcut: ${e.message}`);
           if (e.stderr) this.log(`STDERR: ${e.stderr}`);
           return { success: false, modified: false, message: e.message };
+        } finally {
+          try {
+            fs.unlinkSync(scriptPath);
+          } catch (e) {
+          }
+        }
+      }
+      // Auto-create a Windows shortcut when none exist
+      async _autoCreateWindowsShortcut() {
+        const ideName = this.getIDEName();
+        this.log(`Attempting to auto-create shortcut for: ${ideName}`);
+        const possibleExePaths = [
+          // User-specific installs (most common for Antigravity/Cursor)
+          path2.join(process.env.LOCALAPPDATA || "", "Programs", ideName, `${ideName}.exe`),
+          path2.join(process.env.LOCALAPPDATA || "", ideName, `${ideName}.exe`),
+          // System installs
+          path2.join(process.env.ProgramFiles || "C:\\Program Files", ideName, `${ideName}.exe`),
+          path2.join(process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)", ideName, `${ideName}.exe`),
+          // VS Code specific
+          path2.join(process.env.LOCALAPPDATA || "", "Programs", "Microsoft VS Code", "Code.exe"),
+          path2.join(process.env.ProgramFiles || "C:\\Program Files", "Microsoft VS Code", "Code.exe")
+        ];
+        let foundExe = null;
+        for (const exePath of possibleExePaths) {
+          this.log(`Checking: ${exePath}`);
+          if (fs.existsSync(exePath)) {
+            foundExe = exePath;
+            this.log(`Found executable: ${exePath}`);
+            break;
+          }
+        }
+        if (!foundExe) {
+          this.log("Could not find IDE executable in common locations");
+          return { success: false, message: `Could not find ${ideName}.exe. Please install or create a shortcut manually.` };
+        }
+        const desktopPath = path2.join(process.env.USERPROFILE || "", "Desktop");
+        const shortcutPath = path2.join(desktopPath, `${ideName}.lnk`);
+        const scriptPath = path2.join(os.tmpdir(), "auto_accept_create_shortcut.ps1");
+        try {
+          const psScript = `
+$ErrorActionPreference = "Stop"
+try {
+    $shell = New-Object -ComObject WScript.Shell
+    $shortcut = $shell.CreateShortcut('${shortcutPath.replace(/'/g, "''")}')
+    $shortcut.TargetPath = '${foundExe.replace(/'/g, "''")}'
+    $shortcut.Arguments = '${CDP_FLAG}'
+    $shortcut.WorkingDirectory = '${path2.dirname(foundExe).replace(/'/g, "''")}'
+    $shortcut.Description = '${ideName} with CDP debugging enabled'
+    $shortcut.Save()
+    Write-Output "SUCCESS"
+} catch {
+    Write-Output "ERROR:$($_.Exception.Message)"
+}
+`;
+          fs.writeFileSync(scriptPath, psScript, "utf8");
+          const result = execSync(`powershell -ExecutionPolicy Bypass -File "${scriptPath}"`, {
+            encoding: "utf8",
+            timeout: 1e4
+          }).trim();
+          if (result === "SUCCESS") {
+            this.log(`Successfully created shortcut: ${shortcutPath}`);
+            return { success: true, path: shortcutPath, target: foundExe };
+          } else if (result.startsWith("ERROR:")) {
+            const err = result.substring(6);
+            this.log(`PowerShell error creating shortcut: ${err}`);
+            return { success: false, message: err };
+          } else {
+            return { success: false, message: `Unexpected result: ${result}` };
+          }
+        } catch (e) {
+          this.log(`Error creating shortcut: ${e.message}`);
+          return { success: false, message: e.message };
         } finally {
           try {
             fs.unlinkSync(scriptPath);
@@ -5126,8 +5223,29 @@ exit 1
           this.log("CDP already running, no relaunch needed");
           return { success: true, action: "none", message: "CDP already available" };
         }
-        const shortcuts = await this.findIDEShortcuts();
-        if (shortcuts.length === 0) {
+        let shortcuts = await this.findIDEShortcuts();
+        if (shortcuts.length === 0 && this.platform === "win32") {
+          this.log("No shortcuts found. Attempting to auto-create...");
+          const createResult = await this._autoCreateWindowsShortcut();
+          if (createResult.success) {
+            this.log(`Auto-created shortcut: ${createResult.path}`);
+            shortcuts = [{
+              path: createResult.path,
+              hasFlag: true,
+              // We just created it with the flag
+              type: "desktop",
+              target: createResult.target,
+              args: CDP_FLAG
+            }];
+          } else {
+            this.log(`Failed to auto-create shortcut: ${createResult.message}`);
+            return {
+              success: false,
+              action: "error",
+              message: `No IDE shortcuts found and auto-create failed: ${createResult.message}`
+            };
+          }
+        } else if (shortcuts.length === 0) {
           this.log("No shortcuts found");
           return {
             success: false,
@@ -5220,10 +5338,9 @@ var FREQ_STATE_KEY = "auto-accept-frequency";
 var BANNED_COMMANDS_KEY = "auto-accept-banned-commands";
 var ROI_STATS_KEY = "auto-accept-roi-stats";
 var SECONDS_PER_CLICK = 5;
-var LICENSE_API = "https://auto-accept-backend.onrender.com/api";
 var INSTANCE_ID = Math.random().toString(36).substring(7);
 var isEnabled = false;
-var isPro = false;
+var isPro = true;
 var isLockedOut = false;
 var pollFrequency = 2e3;
 var bannedCommands = [];
@@ -5283,7 +5400,8 @@ async function activate(context) {
   }
   try {
     isEnabled = context.globalState.get(GLOBAL_STATE_KEY, false);
-    isPro = context.globalState.get(PRO_STATE_KEY, false);
+    isPro = true;
+    context.globalState.update(PRO_STATE_KEY, true);
     if (isPro) {
       pollFrequency = context.globalState.get(FREQ_STATE_KEY, 1e3);
     } else {
@@ -5305,22 +5423,7 @@ async function activate(context) {
       "chmod -R 777 /"
     ];
     bannedCommands = context.globalState.get(BANNED_COMMANDS_KEY, defaultBannedCommands);
-    verifyLicense(context).then((isValid) => {
-      if (isPro !== isValid) {
-        isPro = isValid;
-        context.globalState.update(PRO_STATE_KEY, isValid);
-        log(`License re-verification: Updated Pro status to ${isValid}`);
-        if (cdpHandler && cdpHandler.setProStatus) {
-          cdpHandler.setProStatus(isValid);
-        }
-        if (!isValid) {
-          pollFrequency = 300;
-          if (backgroundModeEnabled) {
-          }
-        }
-        updateStatusBar();
-      }
-    });
+    log("OVERRIDE MODE: Pro features permanently enabled");
     currentIDE = detectIDE();
     outputChannel = vscode.window.createOutputChannel("Auto Accept");
     context.subscriptions.push(outputChannel);
@@ -5788,25 +5891,6 @@ function updateStatusBar() {
       statusBackgroundItem.hide();
     }
   }
-}
-async function verifyLicense(context) {
-  const userId = context.globalState.get("auto-accept-userId");
-  if (!userId) return false;
-  return new Promise((resolve) => {
-    const https = require("https");
-    https.get(`${LICENSE_API}/check-license?userId=${userId}`, (res) => {
-      let data = "";
-      res.on("data", (chunk) => data += chunk);
-      res.on("end", () => {
-        try {
-          const json = JSON.parse(data);
-          resolve(json.isPro === true);
-        } catch (e) {
-          resolve(false);
-        }
-      });
-    }).on("error", () => resolve(false));
-  });
 }
 async function showVersionNotification(context) {
   const hasShown = context.globalState.get(VERSION_7_0_KEY, false);

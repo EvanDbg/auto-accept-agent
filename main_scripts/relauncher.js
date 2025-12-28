@@ -8,6 +8,7 @@ const fs = require('fs');
 const path = require('path');
 
 const BASE_CDP_PORT = 9000;
+const ALTERNATE_CDP_PORT = 9222;
 const CDP_FLAG = `--remote-debugging-port=${BASE_CDP_PORT}`;
 
 class Relauncher {
@@ -35,17 +36,26 @@ class Relauncher {
     }
 
     // check if cdp is already running
-    async isCDPRunning(port = BASE_CDP_PORT) {
-        return new Promise((resolve) => {
-            const req = http.get(`http://127.0.0.1:${port}/json/version`, (res) => {
-                resolve(res.statusCode === 200);
+    async isCDPRunning() {
+        // Check both our preferred port and standard 9222
+        const ports = [BASE_CDP_PORT, ALTERNATE_CDP_PORT];
+        for (const port of ports) {
+            const running = await new Promise((resolve) => {
+                const req = http.get(`http://127.0.0.1:${port}/json/version`, (res) => {
+                    resolve(res.statusCode === 200);
+                });
+                req.on('error', () => resolve(false));
+                req.setTimeout(1000, () => {
+                    req.destroy();
+                    resolve(false);
+                });
             });
-            req.on('error', () => resolve(false));
-            req.setTimeout(2000, () => {
-                req.destroy();
-                resolve(false);
-            });
-        });
+            if (running) {
+                this.log(`CDP found running on port ${port}`);
+                return true;
+            }
+        }
+        return false;
     }
 
     // find shortcut for this ide
@@ -74,26 +84,43 @@ class Relauncher {
 
     async _findWindowsShortcuts(ideName) {
         const shortcuts = [];
-        const possiblePaths = [
-            // Start Menu (most reliable)
-            path.join(process.env.APPDATA || '', 'Microsoft', 'Windows', 'Start Menu', 'Programs', ideName, `${ideName}.lnk`),
-            // Desktop
-            path.join(process.env.USERPROFILE || '', 'Desktop', `${ideName}.lnk`),
-            // Taskbar (Windows 10+)
-            path.join(process.env.APPDATA || '', 'Microsoft', 'Internet Explorer', 'Quick Launch', 'User Pinned', 'TaskBar', `${ideName}.lnk`),
+        const searchDirs = [
+            path.join(process.env.APPDATA || '', 'Microsoft', 'Windows', 'Start Menu', 'Programs'),
+            path.join(process.env.USERPROFILE || '', 'Desktop'),
+            path.join(process.env.APPDATA || '', 'Microsoft', 'Internet Explorer', 'Quick Launch', 'User Pinned', 'TaskBar'),
         ];
 
-        for (const shortcutPath of possiblePaths) {
-            if (fs.existsSync(shortcutPath)) {
-                const info = await this._readWindowsShortcut(shortcutPath);
-                shortcuts.push({
-                    path: shortcutPath,
-                    hasFlag: info.hasFlag,
-                    type: shortcutPath.includes('Start Menu') ? 'startmenu' :
-                        shortcutPath.includes('Desktop') ? 'desktop' : 'taskbar',
-                    args: info.args,
-                    target: info.target
-                });
+        // Specific variants to look for based on ideName
+        const nameVariants = [ideName];
+        if (ideName === 'Code') nameVariants.push('Visual Studio Code');
+        if (ideName === 'Antigravity') nameVariants.push('Antigravity CDP');
+
+        for (const dir of searchDirs) {
+            if (!fs.existsSync(dir)) continue;
+
+            try {
+                const files = fs.readdirSync(dir);
+                for (const file of files) {
+                    if (file.endsWith('.lnk')) {
+                        const lowerFile = file.toLowerCase();
+                        const isMatch = nameVariants.some(v => lowerFile.includes(v.toLowerCase()));
+
+                        if (isMatch) {
+                            const shortcutPath = path.join(dir, file);
+                            const info = await this._readWindowsShortcut(shortcutPath);
+                            shortcuts.push({
+                                path: shortcutPath,
+                                hasFlag: info.hasFlag,
+                                type: dir.includes('Start Menu') ? 'startmenu' :
+                                    dir.includes('Desktop') ? 'desktop' : 'taskbar',
+                                args: info.args,
+                                target: info.target
+                            });
+                        }
+                    }
+                }
+            } catch (e) {
+                this.log(`Error searching directory ${dir}: ${e.message}`);
             }
         }
 
@@ -308,6 +335,86 @@ try {
             return { success: false, modified: false, message: e.message };
         } finally {
             // Clean up temp file
+            try { fs.unlinkSync(scriptPath); } catch (e) { /* ignore */ }
+        }
+    }
+
+
+    // Auto-create a Windows shortcut when none exist
+    async _autoCreateWindowsShortcut() {
+        const ideName = this.getIDEName();
+        this.log(`Attempting to auto-create shortcut for: ${ideName}`);
+
+        // Common installation paths for Electron-based IDEs on Windows
+        const possibleExePaths = [
+            // User-specific installs (most common for Antigravity/Cursor)
+            path.join(process.env.LOCALAPPDATA || '', 'Programs', ideName, `${ideName}.exe`),
+            path.join(process.env.LOCALAPPDATA || '', ideName, `${ideName}.exe`),
+            // System installs
+            path.join(process.env.ProgramFiles || 'C:\\Program Files', ideName, `${ideName}.exe`),
+            path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', ideName, `${ideName}.exe`),
+            // VS Code specific
+            path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Microsoft VS Code', 'Code.exe'),
+            path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Microsoft VS Code', 'Code.exe'),
+        ];
+
+        let foundExe = null;
+        for (const exePath of possibleExePaths) {
+            this.log(`Checking: ${exePath}`);
+            if (fs.existsSync(exePath)) {
+                foundExe = exePath;
+                this.log(`Found executable: ${exePath}`);
+                break;
+            }
+        }
+
+        if (!foundExe) {
+            this.log('Could not find IDE executable in common locations');
+            return { success: false, message: `Could not find ${ideName}.exe. Please install or create a shortcut manually.` };
+        }
+
+        // Create shortcut on Desktop
+        const desktopPath = path.join(process.env.USERPROFILE || '', 'Desktop');
+        const shortcutPath = path.join(desktopPath, `${ideName}.lnk`);
+        const scriptPath = path.join(os.tmpdir(), 'auto_accept_create_shortcut.ps1');
+
+        try {
+            const psScript = `
+$ErrorActionPreference = "Stop"
+try {
+    $shell = New-Object -ComObject WScript.Shell
+    $shortcut = $shell.CreateShortcut('${shortcutPath.replace(/'/g, "''")}')
+    $shortcut.TargetPath = '${foundExe.replace(/'/g, "''")}'
+    $shortcut.Arguments = '${CDP_FLAG}'
+    $shortcut.WorkingDirectory = '${path.dirname(foundExe).replace(/'/g, "''")}'
+    $shortcut.Description = '${ideName} with CDP debugging enabled'
+    $shortcut.Save()
+    Write-Output "SUCCESS"
+} catch {
+    Write-Output "ERROR:$($_.Exception.Message)"
+}
+`;
+            fs.writeFileSync(scriptPath, psScript, 'utf8');
+
+            const result = execSync(`powershell -ExecutionPolicy Bypass -File "${scriptPath}"`, {
+                encoding: 'utf8',
+                timeout: 10000
+            }).trim();
+
+            if (result === 'SUCCESS') {
+                this.log(`Successfully created shortcut: ${shortcutPath}`);
+                return { success: true, path: shortcutPath, target: foundExe };
+            } else if (result.startsWith('ERROR:')) {
+                const err = result.substring(6);
+                this.log(`PowerShell error creating shortcut: ${err}`);
+                return { success: false, message: err };
+            } else {
+                return { success: false, message: `Unexpected result: ${result}` };
+            }
+        } catch (e) {
+            this.log(`Error creating shortcut: ${e.message}`);
+            return { success: false, message: e.message };
+        } finally {
             try { fs.unlinkSync(scriptPath); } catch (e) { /* ignore */ }
         }
     }
@@ -625,8 +732,30 @@ exit 1
         }
 
         // Step 2: Find shortcuts
-        const shortcuts = await this.findIDEShortcuts();
-        if (shortcuts.length === 0) {
+        let shortcuts = await this.findIDEShortcuts();
+
+        // Fallback: If no shortcuts found on Windows, try to auto-create one
+        if (shortcuts.length === 0 && this.platform === 'win32') {
+            this.log('No shortcuts found. Attempting to auto-create...');
+            const createResult = await this._autoCreateWindowsShortcut();
+            if (createResult.success) {
+                this.log(`Auto-created shortcut: ${createResult.path}`);
+                shortcuts = [{
+                    path: createResult.path,
+                    hasFlag: true, // We just created it with the flag
+                    type: 'desktop',
+                    target: createResult.target,
+                    args: CDP_FLAG
+                }];
+            } else {
+                this.log(`Failed to auto-create shortcut: ${createResult.message}`);
+                return {
+                    success: false,
+                    action: 'error',
+                    message: `No IDE shortcuts found and auto-create failed: ${createResult.message}`
+                };
+            }
+        } else if (shortcuts.length === 0) {
             this.log('No shortcuts found');
             return {
                 success: false,
