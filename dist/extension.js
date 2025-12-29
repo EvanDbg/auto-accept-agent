@@ -5035,6 +5035,7 @@ try {
       // macOS shortcut handling
       async _findMacOSShortcuts(ideName) {
         const shortcuts = [];
+        this.log(`Searching for macOS apps matching: ${ideName}`);
         const wrapperPath = path2.join(os.homedir(), ".local", "bin", `${ideName.toLowerCase()}-cdp`);
         if (fs.existsSync(wrapperPath)) {
           const content = fs.readFileSync(wrapperPath, "utf8");
@@ -5043,16 +5044,44 @@ try {
             hasFlag: content.includes("--remote-debugging-port"),
             type: "wrapper"
           });
+          this.log(`Found existing wrapper: ${wrapperPath}`);
         }
-        const appPath = `/Applications/${ideName}.app`;
-        if (fs.existsSync(appPath)) {
-          shortcuts.push({
-            path: appPath,
-            hasFlag: false,
-            type: "app"
-          });
+        const commonPaths = [
+          `/Applications/${ideName}.app`,
+          path2.join(os.homedir(), "Applications", `${ideName}.app`),
+          `/Applications/Visual Studio Code.app`
+          // Fallback for 'Code'
+        ];
+        for (const appPath of commonPaths) {
+          if (fs.existsSync(appPath)) {
+            shortcuts.push({
+              path: appPath,
+              hasFlag: false,
+              type: "app"
+            });
+            this.log(`Found app in common location: ${appPath}`);
+          }
         }
-        this.log(`Found ${shortcuts.length} macOS shortcuts/apps`);
+        try {
+          const mdfindCmd = `mdfind "kMDItemKind == 'Application' && kMDItemFSName == '*${ideName}*'"`;
+          const mdfindResult = execSync(mdfindCmd, { encoding: "utf8" }).trim();
+          if (mdfindResult) {
+            const foundPaths = mdfindResult.split("\n");
+            for (const foundPath of foundPaths) {
+              if (foundPath.endsWith(".app") && !shortcuts.some((s) => s.path === foundPath)) {
+                shortcuts.push({
+                  path: foundPath,
+                  hasFlag: false,
+                  type: "app"
+                });
+                this.log(`Found app via mdfind: ${foundPath}`);
+              }
+            }
+          }
+        } catch (e) {
+          this.log(`Spotlight search (mdfind) failed: ${e.message}`);
+        }
+        this.log(`Total macOS shortcuts/apps found: ${shortcuts.length}`);
         return shortcuts;
       }
       async _createMacOSWrapper() {
@@ -5223,8 +5252,14 @@ del "%~f0" & exit
         const scriptPath = path2.join(os.tmpdir(), "relaunch_ide.sh");
         const launchCommand = shortcut.type === "wrapper" ? `"${shortcut.path}" ${folderArgs}` : `open -a "${shortcut.path}" --args ${CDP_FLAG} ${folderArgs}`;
         const scriptContent = `#!/bin/bash
-sleep 2
+# Auto Accept - macOS Relaunch Script
+sleep 5
 ${launchCommand}
+# Ensure the app is focused
+if [[ "${shortcut.path}" == *.app ]]; then
+    app_name=$(basename "${shortcut.path}" .app)
+    osascript -e "tell application \\"$app_name\\" to activate"
+fi
 `;
         try {
           fs.writeFileSync(scriptPath, scriptContent, { mode: 493 });
@@ -5235,8 +5270,9 @@ ${launchCommand}
           });
           child.unref();
           setTimeout(() => {
+            this.log("Triggering IDE quit for macOS relaunch...");
             vscode2.commands.executeCommand("workbench.action.quit");
-          }, 1500);
+          }, 2e3);
           return { success: true };
         } catch (e) {
           this.log(`macOS relaunch error: ${e.message}`);
