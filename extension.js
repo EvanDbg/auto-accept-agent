@@ -238,17 +238,31 @@ async function activate(context) {
                 } else {
                     vscode.window.showErrorMessage('Failed to load Settings Panel.');
                 }
-            })
+            }),
+            vscode.commands.registerCommand('auto-accept.activatePro', () => handleProActivation(context))
         );
 
-        // 6. Check environment and start if enabled
+        // 6. Register URI Handler for deep links (e.g., from Stripe success page)
+        const uriHandler = {
+            handleUri(uri) {
+                log(`URI Handler received: ${uri.toString()}`);
+                if (uri.path === '/activate' || uri.path === 'activate') {
+                    log('Activation URI detected - verifying pro status...');
+                    handleProActivation(context);
+                }
+            }
+        };
+        context.subscriptions.push(vscode.window.registerUriHandler(uriHandler));
+        log('URI Handler registered for activation deep links.');
+
+        // 7. Check environment and start if enabled
         try {
             await checkEnvironmentAndStart();
         } catch (err) {
             log(`Error in environment check: ${err.message}`);
         }
 
-        // 7. Show Version 5.0 Notification (Once)
+        // 8. Show Version 5.0 Notification (Once)
         showVersionNotification(context);
 
         log('Auto Accept: Activation complete');
@@ -839,6 +853,140 @@ async function verifyLicense(context) {
             });
         }).on('error', () => resolve(false));
     });
+}
+
+// Handle Pro activation (called from URI handler or command)
+async function handleProActivation(context) {
+    log('Pro Activation: Starting verification process...');
+
+    // Show progress notification
+    vscode.window.withProgress(
+        {
+            location: vscode.ProgressLocation.Notification,
+            title: 'Auto Accept: Verifying Pro status...',
+            cancellable: false
+        },
+        async (progress) => {
+            progress.report({ increment: 30 });
+
+            // Give webhook a moment to process (Stripe webhooks can have slight delay)
+            await new Promise(resolve => setTimeout(resolve, 1500));
+            progress.report({ increment: 30 });
+
+            // Verify license
+            const isProNow = await verifyLicense(context);
+            progress.report({ increment: 40 });
+
+            if (isProNow) {
+                // Update state
+                isPro = true;
+                await context.globalState.update(PRO_STATE_KEY, true);
+
+                // Update CDP handler if running
+                if (cdpHandler && cdpHandler.setProStatus) {
+                    cdpHandler.setProStatus(true);
+                }
+
+                // Update poll frequency to pro default
+                pollFrequency = context.globalState.get(FREQ_STATE_KEY, 1000);
+
+                // Sync sessions with new pro status
+                if (isEnabled) {
+                    await syncSessions();
+                }
+
+                // Update UI
+                updateStatusBar();
+
+                log('Pro Activation: SUCCESS - User is now Pro!');
+                vscode.window.showInformationMessage(
+                    '🎉 Pro Activated! Thank you for your support. All Pro features are now unlocked.',
+                    'Open Dashboard'
+                ).then(choice => {
+                    if (choice === 'Open Dashboard') {
+                        const panel = getSettingsPanel();
+                        if (panel) panel.createOrShow(context.extensionUri, context);
+                    }
+                });
+            } else {
+                log('Pro Activation: License not found yet. Starting background polling...');
+                // Start background polling in case webhook is delayed
+                startProPolling(context);
+            }
+        }
+    );
+}
+
+// Background polling for delayed webhook scenarios
+let proPollingTimer = null;
+let proPollingAttempts = 0;
+const MAX_PRO_POLLING_ATTEMPTS = 24; // 2 minutes (5s intervals)
+
+function startProPolling(context) {
+    if (proPollingTimer) {
+        clearInterval(proPollingTimer);
+    }
+
+    proPollingAttempts = 0;
+    log('Pro Polling: Starting background verification (checking every 5s for up to 2 minutes)...');
+
+    vscode.window.showInformationMessage(
+        'Payment received! Verifying your Pro status... This may take a moment.'
+    );
+
+    proPollingTimer = setInterval(async () => {
+        proPollingAttempts++;
+        log(`Pro Polling: Attempt ${proPollingAttempts}/${MAX_PRO_POLLING_ATTEMPTS}`);
+
+        if (proPollingAttempts > MAX_PRO_POLLING_ATTEMPTS) {
+            clearInterval(proPollingTimer);
+            proPollingTimer = null;
+            log('Pro Polling: Max attempts reached. User should check manually.');
+            vscode.window.showWarningMessage(
+                'Pro verification is taking longer than expected. Please click "Check Pro Status" in settings, or contact support if the issue persists.',
+                'Open Settings'
+            ).then(choice => {
+                if (choice === 'Open Settings') {
+                    const panel = getSettingsPanel();
+                    if (panel) panel.createOrShow(context.extensionUri, context);
+                }
+            });
+            return;
+        }
+
+        const isProNow = await verifyLicense(context);
+        if (isProNow) {
+            clearInterval(proPollingTimer);
+            proPollingTimer = null;
+
+            // Update state
+            isPro = true;
+            await context.globalState.update(PRO_STATE_KEY, true);
+
+            if (cdpHandler && cdpHandler.setProStatus) {
+                cdpHandler.setProStatus(true);
+            }
+
+            pollFrequency = context.globalState.get(FREQ_STATE_KEY, 1000);
+
+            if (isEnabled) {
+                await syncSessions();
+            }
+
+            updateStatusBar();
+
+            log('Pro Polling: SUCCESS - Pro status confirmed!');
+            vscode.window.showInformationMessage(
+                '🎉 Pro Activated! Thank you for your support. All Pro features are now unlocked.',
+                'Open Dashboard'
+            ).then(choice => {
+                if (choice === 'Open Dashboard') {
+                    const panel = getSettingsPanel();
+                    if (panel) panel.createOrShow(context.extensionUri, context);
+                }
+            });
+        }
+    }, 5000);
 }
 
 async function showVersionNotification(context) {
