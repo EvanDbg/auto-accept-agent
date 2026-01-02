@@ -4701,6 +4701,7 @@ var backgroundModeEnabled = false;
 var BACKGROUND_DONT_SHOW_KEY = "auto-accept-background-dont-show";
 var BACKGROUND_MODE_KEY = "auto-accept-background-mode";
 var VERSION_7_0_KEY = "auto-accept-version-7.0-notification-shown";
+var RELEASY_PROMO_KEY = "auto-accept-releasy-promo-shown";
 var pollTimer;
 var statsCollectionTimer;
 var statusBarItem;
@@ -4861,6 +4862,7 @@ async function activate(context) {
       log(`Error in environment check: ${err.message}`);
     }
     showVersionNotification(context);
+    showReleasyCrossPromo(context);
     log("Auto Accept: Activation complete");
   } catch (error) {
     console.error("ACTIVATION CRITICAL FAILURE:", error);
@@ -5418,6 +5420,37 @@ ${body}`,
   if (selection === btnDashboard) {
     const panel = getSettingsPanel();
     if (panel) panel.createOrShow(context.extensionUri, context);
+  }
+}
+async function showReleasyCrossPromo(context) {
+  const hasShown = context.globalState.get(RELEASY_PROMO_KEY, false);
+  if (hasShown) return;
+  const stats = context.globalState.get(ROI_STATS_KEY, { sessionsThisWeek: 0 });
+  const totalSessions = stats.sessionsThisWeek || 0;
+  if (totalSessions < 3) return;
+  await context.globalState.update(RELEASY_PROMO_KEY, true);
+  const title = "\u{1F389} New from the Auto Accept team";
+  const body = `Releasy AI \u2014 Marketing for Developers
+
+Turn your GitHub commits into Reddit posts automatically.
+
+\u2022 AI analyzes your changes
+\u2022 Generates engaging posts
+\u2022 Auto-publishes to Reddit
+
+Zero effort marketing for your side projects.`;
+  const selection = await vscode.window.showInformationMessage(
+    `${title}
+
+${body}`,
+    { modal: true },
+    "Check it out",
+    "Maybe later"
+  );
+  if (selection === "Check it out") {
+    vscode.env.openExternal(
+      vscode.Uri.parse("https://releasyai.com?utm_source=auto-accept&utm_medium=extension&utm_campaign=version_promo")
+    );
   }
 }
 function deactivate() {

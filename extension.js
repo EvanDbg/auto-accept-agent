@@ -39,6 +39,7 @@ let backgroundModeEnabled = false;
 const BACKGROUND_DONT_SHOW_KEY = 'auto-accept-background-dont-show';
 const BACKGROUND_MODE_KEY = 'auto-accept-background-mode';
 const VERSION_7_0_KEY = 'auto-accept-version-7.0-notification-shown';
+const RELEASY_PROMO_KEY = 'auto-accept-releasy-promo-shown';
 
 let pollTimer;
 let statsCollectionTimer; // For periodic stats collection
@@ -251,6 +252,9 @@ async function activate(context) {
 
         // 8. Show Version 5.0 Notification (Once)
         showVersionNotification(context);
+
+        // 9. Show Releasy AI Cross-Promo (Once, after first session)
+        showReleasyCrossPromo(context);
 
         log('Auto Accept: Activation complete');
     } catch (error) {
@@ -1025,6 +1029,43 @@ async function showVersionNotification(context) {
     if (selection === btnDashboard) {
         const panel = getSettingsPanel();
         if (panel) panel.createOrShow(context.extensionUri, context);
+    }
+}
+
+async function showReleasyCrossPromo(context) {
+    const hasShown = context.globalState.get(RELEASY_PROMO_KEY, false);
+    if (hasShown) return;
+
+    // Only show to returning users (after at least 3 sessions)
+    const stats = context.globalState.get(ROI_STATS_KEY, { sessionsThisWeek: 0 });
+    const totalSessions = stats.sessionsThisWeek || 0;
+    if (totalSessions < 3) return;
+
+    // Mark as shown immediately to prevent multiple showings
+    await context.globalState.update(RELEASY_PROMO_KEY, true);
+
+    const title = "🎉 New from the Auto Accept team";
+    const body = `Releasy AI — Marketing for Developers
+
+Turn your GitHub commits into Reddit posts automatically.
+
+• AI analyzes your changes
+• Generates engaging posts
+• Auto-publishes to Reddit
+
+Zero effort marketing for your side projects.`;
+
+    const selection = await vscode.window.showInformationMessage(
+        `${title}\n\n${body}`,
+        { modal: true },
+        "Check it out",
+        "Maybe later"
+    );
+
+    if (selection === "Check it out") {
+        vscode.env.openExternal(
+            vscode.Uri.parse('https://releasyai.com?utm_source=auto-accept&utm_medium=extension&utm_campaign=version_promo')
+        );
     }
 }
 
