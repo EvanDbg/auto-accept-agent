@@ -629,6 +629,30 @@
         return false;
     }
 
+    // --- 3a. ERROR DETECTION ---
+    /**
+     * Checks if the "Agent terminated due to error" message is nearby.
+     * This is specific for the Antigravity error dialog.
+     */
+    function findNearbyErrorText(el) {
+        // The structure usually is a dialog with a header or body containing the message.
+        // We'll walk up to finding a container, then search for the specific text.
+        let container = el.parentElement;
+        let depth = 0;
+        const maxDepth = 8;
+        const errorSignature = "Agent terminated due to error";
+
+        while (container && depth < maxDepth) {
+            if (container.textContent && container.textContent.includes(errorSignature)) {
+                log(`[ErrorDetect] Found error signature in parent (depth ${depth})`);
+                return true;
+            }
+            container = container.parentElement;
+            depth++;
+        }
+        return false;
+    }
+
     // --- 4. CLICKING LOGIC ---
     function isAcceptButton(el) {
         const text = (el.textContent || "").trim().toLowerCase();
@@ -700,6 +724,19 @@
         for (const el of uniqueFound) {
             if (isAcceptButton(el)) {
                 const buttonText = (el.textContent || "").trim();
+                const lowerText = buttonText.toLowerCase();
+                
+                // --- SPECIAL HANDLING FOR RETRY ON ERROR ---
+                if (lowerText.includes('retry')) {
+                    if (findNearbyErrorText(el)) {
+                        // It's the "Agent terminated due to error" dialog
+                        const delay = Math.floor(Math.random() * 3000) + 2000; // 2000ms to 5000ms
+                        log(`[Retry] Detected Antigravity error dialog. Waiting ${delay}ms to simulate human reaction...`);
+                        await new Promise(r => setTimeout(r, delay));
+                        log(`[Retry] Delay finished. Clicking now.`);
+                    }
+                }
+
                 log(`Clicking: "${buttonText}"`);
 
                 // Dispatch click

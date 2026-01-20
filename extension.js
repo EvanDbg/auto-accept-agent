@@ -39,7 +39,7 @@ let backgroundModeEnabled = false;
 const BACKGROUND_DONT_SHOW_KEY = 'auto-accept-background-dont-show';
 const BACKGROUND_MODE_KEY = 'auto-accept-background-mode';
 const VERSION_7_0_KEY = 'auto-accept-version-7.0-notification-shown';
-const RELEASY_PROMO_KEY = 'auto-accept-releasy-promo-shown';
+
 
 let pollTimer;
 let statsCollectionTimer; // For periodic stats collection
@@ -109,6 +109,17 @@ async function activate(context) {
         isEnabled = context.globalState.get(GLOBAL_STATE_KEY, false);
         isPro = context.globalState.get(PRO_STATE_KEY, false);
 
+        // Read settings from VS Code configuration
+        const config = vscode.workspace.getConfiguration('autoAccept');
+        const localVipOverride = config.get('localVipOverride', false);
+        const configCdpPort = config.get('cdpPort', null);
+
+        // localVipOverride: 本地强制 VIP 模式（测试用）
+        if (localVipOverride) {
+            isPro = true;
+            log('localVipOverride is enabled - forcing Pro mode');
+        }
+
         // Load frequency
         if (isPro) {
             pollFrequency = context.globalState.get(FREQ_STATE_KEY, 1000);
@@ -136,27 +147,29 @@ async function activate(context) {
         bannedCommands = context.globalState.get(BANNED_COMMANDS_KEY, defaultBannedCommands);
 
 
-        // 1.5 Verify License Background Check
-        verifyLicense(context).then(isValid => {
-            if (isPro !== isValid) {
-                isPro = isValid;
-                context.globalState.update(PRO_STATE_KEY, isValid);
-                log(`License re-verification: Updated Pro status to ${isValid}`);
+        // 1.5 Verify License Background Check (skip if localVipOverride is enabled)
+        if (!localVipOverride) {
+            verifyLicense(context).then(isValid => {
+                if (isPro !== isValid) {
+                    isPro = isValid;
+                    context.globalState.update(PRO_STATE_KEY, isValid);
+                    log(`License re-verification: Updated Pro status to ${isValid}`);
 
-                if (cdpHandler && cdpHandler.setProStatus) {
-                    cdpHandler.setProStatus(isValid);
-                }
-
-                if (!isValid) {
-                    pollFrequency = 300; // Downgrade speed
-                    if (backgroundModeEnabled) {
-                        // Optional: Disable background mode visual toggle if desired, 
-                        // but logic gate handles it.
+                    if (cdpHandler && cdpHandler.setProStatus) {
+                        cdpHandler.setProStatus(isValid);
                     }
+
+                    if (!isValid) {
+                        pollFrequency = 300; // Downgrade speed
+                        if (backgroundModeEnabled) {
+                            // Optional: Disable background mode visual toggle if desired, 
+                            // but logic gate handles it.
+                        }
+                    }
+                    updateStatusBar();
                 }
-                updateStatusBar();
-            }
-        });
+            });
+        } // end if (!LOCAL_VIP_OVERRIDE)
 
         currentIDE = detectIDE();
 
@@ -187,7 +200,7 @@ async function activate(context) {
             const { CDPHandler } = require('./main_scripts/cdp-handler');
             const { Relauncher } = require('./main_scripts/relauncher');
 
-            cdpHandler = new CDPHandler(log);
+            cdpHandler = new CDPHandler(log, { cdpPort: configCdpPort });
             relauncher = new Relauncher(log);
             log(`CDP handlers initialized for ${currentIDE}.`);
         } catch (err) {
@@ -227,6 +240,10 @@ async function activate(context) {
                     vscode.window.showErrorMessage('Failed to load Settings Panel.');
                 }
             }),
+            vscode.commands.registerCommand('auto-accept.getCdpPort', () => {
+                // Return the currently detected/configured CDP port
+                return cdpHandler ? cdpHandler.targetPort : null;
+            }),
             vscode.commands.registerCommand('auto-accept.activatePro', () => handleProActivation(context))
         );
 
@@ -253,8 +270,7 @@ async function activate(context) {
         // 8. Show Version 5.0 Notification (Once)
         showVersionNotification(context);
 
-        // 9. Show Releasy AI Cross-Promo (Once, after first session)
-        showReleasyCrossPromo(context);
+
 
         log('Auto Accept: Activation complete');
     } catch (error) {
@@ -309,7 +325,9 @@ async function handleToggle(context) {
 
     try {
         // Check CDP availability first
+        log('handleToggle: Checking CDP availability...');
         const cdpAvailable = cdpHandler ? await cdpHandler.isCDPAvailable() : false;
+        log(`handleToggle: cdpAvailable = ${cdpAvailable}`);
 
         // If trying to enable but CDP not available, prompt for relaunch (don't change state)
         if (!isEnabled && !cdpAvailable && relauncher) {
@@ -423,8 +441,7 @@ async function handleBackgroundToggle(context) {
             'You might see tabs change quickly while it works.',
             { modal: true },
             'Enable',
-            "Don't Show Again & Enable",
-            'Cancel'
+            "Don't Show Again & Enable"
         );
 
         if (choice === 'Cancel' || !choice) {
@@ -1032,42 +1049,7 @@ async function showVersionNotification(context) {
     }
 }
 
-async function showReleasyCrossPromo(context) {
-    const hasShown = context.globalState.get(RELEASY_PROMO_KEY, false);
-    if (hasShown) return;
 
-    // Only show to returning users (after at least 3 sessions)
-    const stats = context.globalState.get(ROI_STATS_KEY, { sessionsThisWeek: 0 });
-    const totalSessions = stats.sessionsThisWeek || 0;
-    if (totalSessions < 3) return;
-
-    // Mark as shown immediately to prevent multiple showings
-    await context.globalState.update(RELEASY_PROMO_KEY, true);
-
-    const title = "🎉 New from the Auto Accept team";
-    const body = `Releasy AI — Marketing for Developers
-
-Turn your GitHub commits into Reddit posts automatically.
-
-• AI analyzes your changes
-• Generates engaging posts
-• Auto-publishes to Reddit
-
-Zero effort marketing for your side projects.`;
-
-    const selection = await vscode.window.showInformationMessage(
-        `${title}\n\n${body}`,
-        { modal: true },
-        "Check it out",
-        "Maybe later"
-    );
-
-    if (selection === "Check it out") {
-        vscode.env.openExternal(
-            vscode.Uri.parse('https://releasyai.com?utm_source=auto-accept&utm_medium=extension&utm_campaign=version_promo')
-        );
-    }
-}
 
 function deactivate() {
     stopPolling();

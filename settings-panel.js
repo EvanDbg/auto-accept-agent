@@ -86,6 +86,15 @@ class SettingsPanel {
                     case 'dismissPrompt':
                         await this.handleDismiss();
                         break;
+                    case 'getCdpPortInfo':
+                        this.sendCdpPortInfo();
+                        break;
+                    case 'setCdpPort':
+                        const config = vscode.workspace.getConfiguration('autoAccept');
+                        await config.update('cdpPort', message.value, vscode.ConfigurationTarget.Global);
+                        vscode.window.showInformationMessage(`CDP Port updated to ${message.value || 'auto-detect'}. Restart to apply.`);
+                        this.sendCdpPortInfo();
+                        break;
                 }
             },
             null,
@@ -115,6 +124,10 @@ class SettingsPanel {
     }
 
     isPro() {
+        // Check VS Code settings for localVipOverride
+        const config = vscode.workspace.getConfiguration('autoAccept');
+        const localVipOverride = config.get('localVipOverride', false);
+        if (localVipOverride) return true;
         return this.context.globalState.get('auto-accept-isPro', false);
     }
 
@@ -199,7 +212,27 @@ class SettingsPanel {
         setTimeout(() => {
             this.sendStats();
             this.sendROIStats();
+            this.sendCdpPortInfo();
         }, 100);
+    }
+
+    sendCdpPortInfo() {
+        const config = vscode.workspace.getConfiguration('autoAccept');
+        const configuredPort = config.get('cdpPort', null);
+        // Get detected port from extension command
+        vscode.commands.executeCommand('auto-accept.getCdpPort').then(detectedPort => {
+            this.panel.webview.postMessage({
+                command: 'updateCdpPortInfo',
+                configuredPort,
+                detectedPort: detectedPort || null
+            });
+        }).catch(() => {
+            this.panel.webview.postMessage({
+                command: 'updateCdpPortInfo',
+                configuredPort,
+                detectedPort: null
+            });
+        });
     }
 
     getHtmlContent() {
@@ -539,6 +572,26 @@ class SettingsPanel {
                 </div>
 
                 <div class="section">
+                    <div class="section-label">🔌 CDP Connection</div>
+                    <div style="font-size: 13px; opacity: 0.6; margin-bottom: 16px; line-height: 1.5;">
+                        Chrome DevTools Protocol port for communicating with Antigravity.
+                    </div>
+                    <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 12px;">
+                        <span style="font-size: 12px; min-width: 100px;">Detected Port:</span>
+                        <span id="detectedPort" style="font-family: monospace; color: var(--green);">...</span>
+                    </div>
+                    <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 12px;">
+                        <span style="font-size: 12px; min-width: 100px;">Override Port:</span>
+                        <input type="number" id="cdpPortInput" style="width: 100px; padding: 8px; border-radius: 6px; border: 1px solid var(--border); background: rgba(0,0,0,0.3); color: var(--fg); font-family: monospace;" placeholder="auto">
+                        <button id="saveCdpPortBtn" class="btn-outline" style="padding: 8px 16px;">Save</button>
+                        <button id="clearCdpPortBtn" class="btn-outline" style="padding: 8px 12px; opacity: 0.6;">Auto</button>
+                    </div>
+                    <div style="font-size: 11px; opacity: 0.4; margin-top: 8px;">
+                        Leave empty for auto-detection from parent process.
+                    </div>
+                </div>
+
+                <div class="section">
                     <div class="section-label">🛡️ Safety Rules</div>
                     <div style="font-size: 13px; opacity: 0.6; margin-bottom: 16px; line-height: 1.5;">
                         Patterns that will NEVER be auto-accepted.
@@ -656,9 +709,48 @@ class SettingsPanel {
                     }
                 });
 
+                // --- CDP Port Handlers ---
+                const cdpPortInput = document.getElementById('cdpPortInput');
+                const saveCdpPortBtn = document.getElementById('saveCdpPortBtn');
+                const clearCdpPortBtn = document.getElementById('clearCdpPortBtn');
+
+                if (saveCdpPortBtn) {
+                    saveCdpPortBtn.addEventListener('click', () => {
+                        const val = cdpPortInput.value ? parseInt(cdpPortInput.value, 10) : null;
+                        vscode.postMessage({ command: 'setCdpPort', value: val });
+                    });
+                }
+
+                if (clearCdpPortBtn) {
+                    clearCdpPortBtn.addEventListener('click', () => {
+                        cdpPortInput.value = '';
+                        vscode.postMessage({ command: 'setCdpPort', value: null });
+                    });
+                }
+
+                window.addEventListener('message', e => {
+                    const msg = e.data;
+                    if (msg.command === 'updateCdpPortInfo') {
+                        const detectedPortEl = document.getElementById('detectedPort');
+                        if (detectedPortEl) {
+                            if (msg.detectedPort) {
+                                detectedPortEl.innerText = msg.detectedPort;
+                                detectedPortEl.style.color = 'var(--green)';
+                            } else {
+                                detectedPortEl.innerText = 'Not detected';
+                                detectedPortEl.style.color = 'var(--fg-dim)';
+                            }
+                        }
+                        if (cdpPortInput && msg.configuredPort) {
+                            cdpPortInput.value = msg.configuredPort;
+                        }
+                    }
+                });
+
                 // Initial load
                 refreshStats();
                 vscode.postMessage({ command: 'getBannedCommands' });
+                vscode.postMessage({ command: 'getCdpPortInfo' });
             </script>
         </body>
         </html>`;

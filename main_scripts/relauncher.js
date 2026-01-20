@@ -78,13 +78,27 @@ class Relauncher {
         // Optimization: checking the process arguments of the current instance
         // This is the most reliable way to know if WE were launched with it
         const args = process.argv.join(' ');
-        return args.includes('--remote-debugging-port=9000');
+        return /--remote-debugging-port=\d+/.test(args);
     }
 
     /**
      * Modify the primary launch shortcut for the current platform
+     * DISABLED: Returns 'SKIPPED' to avoid modifying system shortcuts
      */
     async modifyShortcut() {
+        const ideName = this.getIdeName();
+        // 1. Confirm with user
+        const selection = await vscode.window.showInformationMessage(
+            `Auto Accept needs to modify your ${ideName} shortcut to enable connection. This adds the "--remote-debugging-port" flag so the extension can see the IDE.`,
+            { modal: true },
+            'Proceed'
+        );
+
+        if (selection !== 'Proceed') {
+            this.log('User cancelled shortcut modification.');
+            return 'CANCELLED';
+        }
+
         try {
             if (this.platform === 'win32') return await this._modifyWindowsShortcut();
             if (this.platform === 'darwin') return await this._modifyMacOSShortcut() ? 'MODIFIED' : 'FAILED';
@@ -98,6 +112,15 @@ class Relauncher {
     async _modifyWindowsShortcut() {
         const ideName = this.getIdeName();
         this.log(`Starting Windows shortcut modification for ${ideName}...`);
+
+        // PowerShell script to find and patch the shortcut
+        // Logic:
+        // 1. Find shortcut
+        // 2. Read arguments
+        // 3. Check for --user-data-dir
+        // 4. Calculate unique port (MD5 hash of path -> range 9001-9050) or use 9000
+        // 5. Update arguments
+
         const script = `
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $ErrorActionPreference = "Continue"
@@ -112,32 +135,58 @@ $TargetFolders = @(
     [System.IO.Path]::Combine($env:USERPROFILE, "Desktop")
 )
 
-# Search ONLY for the current IDE variant
-$SearchPatterns = @("*${ideName}*")
+# Search ONLY for the exact IDE shortcut
+$SearchPatterns = @("${ideName}.lnk")
 
 $anyModified = $false
 $anyReady = $false
+$targetPort = 9000
 
 foreach ($folder in $TargetFolders) {
     if (Test-Path $folder) {
         Write-Output "DEBUG: Searching folder: $folder"
         foreach ($pattern in $SearchPatterns) {
-            $files = Get-ChildItem -Path $folder -Filter "$pattern.lnk" -Recurse
+            $files = Get-ChildItem -Path $folder -Filter "$pattern.lnk" -Recurse -ErrorAction SilentlyContinue
             foreach ($file in $files) {
                 Write-Output "DEBUG: Found shortcut: $($file.FullName)"
                 try {
                     $shortcut = $WshShell.CreateShortcut($file.FullName)
-                    if ($shortcut.Arguments -notlike "*--remote-debugging-port=9000*") {
-                        if ($shortcut.Arguments -match "--remote-debugging-port=\\d+") {
-                            $shortcut.Arguments = $shortcut.Arguments -replace "--remote-debugging-port=\\d+", "--remote-debugging-port=9000"
+                    $args = $shortcut.Arguments
+                    
+                    # --- Port Calculation Logic ---
+                    $portToUse = 9000
+                    if ($args -match '--user-data-dir=["'']?([^"''\s]+)["'']?') {
+                        $profilePath = $Matches[1]
+                        Write-Output "DEBUG: Found user-data-dir: $profilePath"
+                        
+                        # Calculate stable hash for port 9001-9050
+                        $md5 = [System.Security.Cryptography.MD5]::Create()
+                        $pathBytes = [System.Text.Encoding]::UTF8.GetBytes($profilePath)
+                        $hashBytes = $md5.ComputeHash($pathBytes)
+                        # Use first 2 bytes to get a number
+                        $val = [BitConverter]::ToUInt16($hashBytes, 0)
+                        $portToUse = 9001 + ($val % 50)
+                        Write-Output "DEBUG: Calculated dynamic port: $portToUse"
+                    } else {
+                        Write-Output "DEBUG: No user-data-dir found, using default port 9000"
+                    }
+                    
+                    $targetPort = $portToUse
+                    $portFlag = "--remote-debugging-port=$portToUse"
+
+                    if ($args -notlike "*--remote-debugging-port=$portToUse*") {
+                        # Remove existing port flag if any (different port)
+                        if ($args -match "--remote-debugging-port=\\d+") {
+                            $shortcut.Arguments = $args -replace "--remote-debugging-port=\\d+", $portFlag
                         } else {
-                            $shortcut.Arguments = "--remote-debugging-port=9000 " + $shortcut.Arguments
+                            $shortcut.Arguments = "$portFlag " + $args
                         }
+                        
                         $shortcut.Save()
-                        Write-Output "DEBUG: SUCCESSFULLY MODIFIED: $($file.FullName)"
+                        Write-Output "DEBUG: SUCCESSFULLY MODIFIED: $($file.FullName) to use port $portToUse"
                         $anyModified = $true
                     } else {
-                        Write-Output "DEBUG: Flag already present in: $($file.FullName)"
+                        Write-Output "DEBUG: Correct flag already present in: $($file.FullName)"
                         $anyReady = $true
                     }
                 } catch {

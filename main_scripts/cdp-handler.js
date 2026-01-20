@@ -7,11 +7,18 @@ const BASE_PORT = 9000;
 const PORT_RANGE = 3; // 9000 +/- 3
 
 class CDPHandler {
-    constructor(logger = console.log) {
+    /**
+     * @param {Function} logger - Logger function
+     * @param {Object} options - Configuration options
+     * @param {number|null} options.cdpPort - CDP port override (from VS Code settings)
+     */
+    constructor(logger = console.log, options = {}) {
         this.logger = logger;
         this.connections = new Map(); // port:pageId -> {ws, injected}
         this.isEnabled = false;
         this.msgId = 1;
+        this.configCdpPort = options.cdpPort || null;
+        this.targetPort = this._detectPort();
     }
 
     log(msg) {
@@ -19,15 +26,135 @@ class CDPHandler {
     }
 
     /**
-     * Check if any CDP port in the target range is active
+     * Detect the CDP port to use. Priority:
+     * 1. CDP_PORT from config (user override)
+     * 2. --remote-debugging-port from parent process command line (Windows WMI)
+     * 3. --remote-debugging-port from process.argv (unlikely but try)
+     * 4. null (will fall back to port range scan)
+     */
+    _detectPort() {
+        // 1. Check config override (from VS Code settings)
+        if (this.configCdpPort) {
+            this.log(`Using cdpPort from settings: ${this.configCdpPort}`);
+            return this.configCdpPort;
+        }
+
+        // 2. Try to detect from parent process command line (Windows only)
+        // Extension Host is a child process, its parent is the main Electron process
+        const parentPort = this._getParentProcessPort();
+        if (parentPort) {
+            this.log(`Detected --remote-debugging-port from parent process: ${parentPort}`);
+            return parentPort;
+        }
+
+        // 3. Try to detect from current process.argv (unlikely to work)
+        const args = process.argv.join(' ');
+        const match = args.match(/--remote-debugging-port[=\s]+(\d+)/);
+        if (match) {
+            const port = parseInt(match[1], 10);
+            this.log(`Detected --remote-debugging-port from process.argv: ${port}`);
+            return port;
+        }
+
+        // 4. Check ELECTRON_REMOTE_DEBUGGING_PORT env var (some setups use this)
+        if (process.env.ELECTRON_REMOTE_DEBUGGING_PORT) {
+            const port = parseInt(process.env.ELECTRON_REMOTE_DEBUGGING_PORT, 10);
+            this.log(`Detected port from ELECTRON_REMOTE_DEBUGGING_PORT env: ${port}`);
+            return port;
+        }
+
+        this.log('Strict Mode: No specific port detected. Auto-scan is disabled.');
+        return null;
+    }
+
+    /**
+     * Get the remote-debugging-port from parent process command line (Windows only)
+     * Uses synchronous execSync for simplicity since this runs once at startup
+     */
+    _getParentProcessPort() {
+        if (process.platform !== 'win32') {
+            this.log('Parent process detection: Not Windows, skipping');
+            return null;
+        }
+
+        try {
+            const { execSync } = require('child_process');
+            const os = require('os');
+            const pathModule = require('path');
+            const ppid = process.ppid;
+
+            if (!ppid) {
+                this.log('Parent process detection: Cannot get parent PID');
+                return null;
+            }
+
+            this.log(`Parent process detection: Current PID=${process.pid}, Parent PID=${ppid}`);
+
+            // Write PowerShell script to temp file to avoid escaping issues
+            const scriptContent = `$current = ${ppid}
+for ($i = 0; $i -lt 10; $i++) {
+    try {
+        $proc = Get-CimInstance Win32_Process -Filter "ProcessId = $current" -ErrorAction SilentlyContinue
+        if ($proc -and $proc.CommandLine) {
+            if ($proc.CommandLine -match '--remote-debugging-port=(\\d+)') {
+                Write-Output $Matches[1]
+                exit 0
+            }
+        }
+        if ($proc -and $proc.ParentProcessId -and $proc.ParentProcessId -ne 0) {
+            $current = $proc.ParentProcessId
+        } else {
+            break
+        }
+    } catch {
+        break
+    }
+}
+`;
+            const tempFile = pathModule.join(os.tmpdir(), `cdp-detect-${Date.now()}.ps1`);
+            fs.writeFileSync(tempFile, scriptContent, 'utf8');
+
+            try {
+                const result = execSync(`powershell -ExecutionPolicy Bypass -File "${tempFile}"`, {
+                    encoding: 'utf8',
+                    timeout: 5000,
+                    windowsHide: true
+                }).trim();
+
+                this.log(`Parent process detection: PowerShell result = "${result}"`);
+
+                if (result && /^\d+$/.test(result)) {
+                    return parseInt(result, 10);
+                }
+            } finally {
+                try { fs.unlinkSync(tempFile); } catch (e) { }
+            }
+        } catch (e) {
+            this.log(`Parent process detection failed: ${e.message}`);
+        }
+
+        return null;
+    }
+
+    /**
+     * Check if CDP port is active
      */
     async isCDPAvailable() {
-        for (let port = BASE_PORT - PORT_RANGE; port <= BASE_PORT + PORT_RANGE; port++) {
-            try {
-                const pages = await this._getPages(port);
-                if (pages.length > 0) return true;
-            } catch (e) { }
+        if (!this.targetPort) {
+            this.log('isCDPAvailable: No target port identified. CDP unavailable.');
+            return false;
         }
+
+        this.log(`isCDPAvailable: Checking target port ${this.targetPort}...`);
+        try {
+            const pages = await this._getPages(this.targetPort);
+            if (pages.length > 0) {
+                this.log(`isCDPAvailable: Found active pages on port ${this.targetPort}`);
+                return true;
+            }
+        } catch (e) { }
+
+        this.log(`isCDPAvailable: Target port ${this.targetPort} not responding or valid`);
         return false;
     }
 
@@ -35,22 +162,29 @@ class CDPHandler {
      * Start/maintain the CDP connection and injection loop
      */
     async start(config) {
-        this.isEnabled = true;
-        this.log(`Scanning ports ${BASE_PORT - PORT_RANGE} to ${BASE_PORT + PORT_RANGE}...`);
+        if (!this.targetPort) {
+            this.log('Start: No target port identified. Aborting.');
+            return;
+        }
 
-        for (let port = BASE_PORT - PORT_RANGE; port <= BASE_PORT + PORT_RANGE; port++) {
-            try {
-                const pages = await this._getPages(port);
-                for (const page of pages) {
-                    const id = `${port}:${page.id}`;
-                    if (!this.connections.has(id)) {
-                        await this._connect(id, page.webSocketDebuggerUrl);
-                    }
-                    await this._inject(id, config);
+        this.isEnabled = true;
+        this.log(`Start: Connecting to port ${this.targetPort}...`);
+
+        try {
+            const pages = await this._getPages(this.targetPort);
+            for (const page of pages) {
+                const id = `${this.targetPort}:${page.id}`;
+                if (!this.connections.has(id)) {
+                    await this._connect(id, page.webSocketDebuggerUrl);
                 }
-            } catch (e) { }
+                await this._inject(id, config);
+            }
+        } catch (e) {
+            this.log(`Start: Connection failed: ${e.message}`);
         }
     }
+
+
 
     async stop() {
         this.isEnabled = false;

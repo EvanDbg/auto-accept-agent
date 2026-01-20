@@ -1,0 +1,40 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Run Extension",
+            "type": "extensionHost",
+            "request": "launch",
+            "args": [
+                "--extensionDevelopmentPath=${workspaceFolder}"
+            ],
+            "outFiles": [
+                "${workspaceFolder}/dist/**/*.js"
+            ],
+            "preLaunchTask": "npm: compile"
+        },
+        {
+            "name": "Attach to Antigravity Extension Host",
+            "type": "node",
+            "request": "attach",
+            "port": 53035,
+            "restart": true,
+            "skipFiles": [
+                "<node_internals>/**"
+            ],
+            "outFiles": [
+                "${workspaceFolder}/dist/**/*.js"
+            ]
+        }
+    ],
+    "compounds": [
+        {
+            "name": "Debug Antigravity Extension (with CDP)",
+            "configurations": [
+                "Attach to Antigravity Extension Host"
+            ],
+            "preLaunchTask": "Start Antigravity Debug",
+            "stopAll": true
+        }
+    ]
+}

@@ -7,6 +7,7 @@ var __commonJS = (cb, mod) => function __require() {
 var require_config = __commonJS({
   "config.js"(exports2, module2) {
     module2.exports = {
+      // Stripe 支付链接（这些不适合放在 VS Code 设置中，保留在此处）
       STRIPE_LINKS: {
         MONTHLY: "https://buy.stripe.com/7sY00j3eN0Pt9f94549MY0v",
         YEARLY: "https://buy.stripe.com/3cI3cv5mVaq3crlfNM9MY0u"
@@ -88,6 +89,15 @@ var require_settings_panel = __commonJS({
               case "dismissPrompt":
                 await this.handleDismiss();
                 break;
+              case "getCdpPortInfo":
+                this.sendCdpPortInfo();
+                break;
+              case "setCdpPort":
+                const config = vscode2.workspace.getConfiguration("autoAccept");
+                await config.update("cdpPort", message.value, vscode2.ConfigurationTarget.Global);
+                vscode2.window.showInformationMessage(`CDP Port updated to ${message.value || "auto-detect"}. Restart to apply.`);
+                this.sendCdpPortInfo();
+                break;
             }
           },
           null,
@@ -112,6 +122,9 @@ var require_settings_panel = __commonJS({
         }
       }
       isPro() {
+        const config = vscode2.workspace.getConfiguration("autoAccept");
+        const localVipOverride = config.get("localVipOverride", false);
+        if (localVipOverride) return true;
         return this.context.globalState.get("auto-accept-isPro", false);
       }
       getUserId() {
@@ -183,7 +196,25 @@ var require_settings_panel = __commonJS({
         setTimeout(() => {
           this.sendStats();
           this.sendROIStats();
+          this.sendCdpPortInfo();
         }, 100);
+      }
+      sendCdpPortInfo() {
+        const config = vscode2.workspace.getConfiguration("autoAccept");
+        const configuredPort = config.get("cdpPort", null);
+        vscode2.commands.executeCommand("auto-accept.getCdpPort").then((detectedPort) => {
+          this.panel.webview.postMessage({
+            command: "updateCdpPortInfo",
+            configuredPort,
+            detectedPort: detectedPort || null
+          });
+        }).catch(() => {
+          this.panel.webview.postMessage({
+            command: "updateCdpPortInfo",
+            configuredPort,
+            detectedPort: null
+          });
+        });
       }
       getHtmlContent() {
         const isPro2 = this.isPro();
@@ -517,6 +548,26 @@ var require_settings_panel = __commonJS({
                 </div>
 
                 <div class="section">
+                    <div class="section-label">\u{1F50C} CDP Connection</div>
+                    <div style="font-size: 13px; opacity: 0.6; margin-bottom: 16px; line-height: 1.5;">
+                        Chrome DevTools Protocol port for communicating with Antigravity.
+                    </div>
+                    <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 12px;">
+                        <span style="font-size: 12px; min-width: 100px;">Detected Port:</span>
+                        <span id="detectedPort" style="font-family: monospace; color: var(--green);">...</span>
+                    </div>
+                    <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 12px;">
+                        <span style="font-size: 12px; min-width: 100px;">Override Port:</span>
+                        <input type="number" id="cdpPortInput" style="width: 100px; padding: 8px; border-radius: 6px; border: 1px solid var(--border); background: rgba(0,0,0,0.3); color: var(--fg); font-family: monospace;" placeholder="auto">
+                        <button id="saveCdpPortBtn" class="btn-outline" style="padding: 8px 16px;">Save</button>
+                        <button id="clearCdpPortBtn" class="btn-outline" style="padding: 8px 12px; opacity: 0.6;">Auto</button>
+                    </div>
+                    <div style="font-size: 11px; opacity: 0.4; margin-top: 8px;">
+                        Leave empty for auto-detection from parent process.
+                    </div>
+                </div>
+
+                <div class="section">
                     <div class="section-label">\u{1F6E1}\uFE0F Safety Rules</div>
                     <div style="font-size: 13px; opacity: 0.6; margin-bottom: 16px; line-height: 1.5;">
                         Patterns that will NEVER be auto-accepted.
@@ -634,9 +685,48 @@ var require_settings_panel = __commonJS({
                     }
                 });
 
+                // --- CDP Port Handlers ---
+                const cdpPortInput = document.getElementById('cdpPortInput');
+                const saveCdpPortBtn = document.getElementById('saveCdpPortBtn');
+                const clearCdpPortBtn = document.getElementById('clearCdpPortBtn');
+
+                if (saveCdpPortBtn) {
+                    saveCdpPortBtn.addEventListener('click', () => {
+                        const val = cdpPortInput.value ? parseInt(cdpPortInput.value, 10) : null;
+                        vscode.postMessage({ command: 'setCdpPort', value: val });
+                    });
+                }
+
+                if (clearCdpPortBtn) {
+                    clearCdpPortBtn.addEventListener('click', () => {
+                        cdpPortInput.value = '';
+                        vscode.postMessage({ command: 'setCdpPort', value: null });
+                    });
+                }
+
+                window.addEventListener('message', e => {
+                    const msg = e.data;
+                    if (msg.command === 'updateCdpPortInfo') {
+                        const detectedPortEl = document.getElementById('detectedPort');
+                        if (detectedPortEl) {
+                            if (msg.detectedPort) {
+                                detectedPortEl.innerText = msg.detectedPort;
+                                detectedPortEl.style.color = 'var(--green)';
+                            } else {
+                                detectedPortEl.innerText = 'Not detected';
+                                detectedPortEl.style.color = 'var(--fg-dim)';
+                            }
+                        }
+                        if (cdpPortInput && msg.configuredPort) {
+                            cdpPortInput.value = msg.configuredPort;
+                        }
+                    }
+                });
+
                 // Initial load
                 refreshStats();
                 vscode.postMessage({ command: 'getBannedCommands' });
+                vscode.postMessage({ command: 'getCdpPortInfo' });
             </script>
         </body>
         </html>`;
@@ -4322,49 +4412,158 @@ var require_cdp_handler = __commonJS({
     var http = require("http");
     var fs = require("fs");
     var path2 = require("path");
-    var BASE_PORT = 9e3;
-    var PORT_RANGE = 3;
     var CDPHandler = class {
-      constructor(logger = console.log) {
+      /**
+       * @param {Function} logger - Logger function
+       * @param {Object} options - Configuration options
+       * @param {number|null} options.cdpPort - CDP port override (from VS Code settings)
+       */
+      constructor(logger = console.log, options = {}) {
         this.logger = logger;
         this.connections = /* @__PURE__ */ new Map();
         this.isEnabled = false;
         this.msgId = 1;
+        this.configCdpPort = options.cdpPort || null;
+        this.targetPort = this._detectPort();
       }
       log(msg) {
         this.logger(`[CDP] ${msg}`);
       }
       /**
-       * Check if any CDP port in the target range is active
+       * Detect the CDP port to use. Priority:
+       * 1. CDP_PORT from config (user override)
+       * 2. --remote-debugging-port from parent process command line (Windows WMI)
+       * 3. --remote-debugging-port from process.argv (unlikely but try)
+       * 4. null (will fall back to port range scan)
+       */
+      _detectPort() {
+        if (this.configCdpPort) {
+          this.log(`Using cdpPort from settings: ${this.configCdpPort}`);
+          return this.configCdpPort;
+        }
+        const parentPort = this._getParentProcessPort();
+        if (parentPort) {
+          this.log(`Detected --remote-debugging-port from parent process: ${parentPort}`);
+          return parentPort;
+        }
+        const args = process.argv.join(" ");
+        const match = args.match(/--remote-debugging-port[=\s]+(\d+)/);
+        if (match) {
+          const port = parseInt(match[1], 10);
+          this.log(`Detected --remote-debugging-port from process.argv: ${port}`);
+          return port;
+        }
+        if (process.env.ELECTRON_REMOTE_DEBUGGING_PORT) {
+          const port = parseInt(process.env.ELECTRON_REMOTE_DEBUGGING_PORT, 10);
+          this.log(`Detected port from ELECTRON_REMOTE_DEBUGGING_PORT env: ${port}`);
+          return port;
+        }
+        this.log("Strict Mode: No specific port detected. Auto-scan is disabled.");
+        return null;
+      }
+      /**
+       * Get the remote-debugging-port from parent process command line (Windows only)
+       * Uses synchronous execSync for simplicity since this runs once at startup
+       */
+      _getParentProcessPort() {
+        if (process.platform !== "win32") {
+          this.log("Parent process detection: Not Windows, skipping");
+          return null;
+        }
+        try {
+          const { execSync } = require("child_process");
+          const os = require("os");
+          const pathModule = require("path");
+          const ppid = process.ppid;
+          if (!ppid) {
+            this.log("Parent process detection: Cannot get parent PID");
+            return null;
+          }
+          this.log(`Parent process detection: Current PID=${process.pid}, Parent PID=${ppid}`);
+          const scriptContent = `$current = ${ppid}
+for ($i = 0; $i -lt 10; $i++) {
+    try {
+        $proc = Get-CimInstance Win32_Process -Filter "ProcessId = $current" -ErrorAction SilentlyContinue
+        if ($proc -and $proc.CommandLine) {
+            if ($proc.CommandLine -match '--remote-debugging-port=(\\d+)') {
+                Write-Output $Matches[1]
+                exit 0
+            }
+        }
+        if ($proc -and $proc.ParentProcessId -and $proc.ParentProcessId -ne 0) {
+            $current = $proc.ParentProcessId
+        } else {
+            break
+        }
+    } catch {
+        break
+    }
+}
+`;
+          const tempFile = pathModule.join(os.tmpdir(), `cdp-detect-${Date.now()}.ps1`);
+          fs.writeFileSync(tempFile, scriptContent, "utf8");
+          try {
+            const result = execSync(`powershell -ExecutionPolicy Bypass -File "${tempFile}"`, {
+              encoding: "utf8",
+              timeout: 5e3,
+              windowsHide: true
+            }).trim();
+            this.log(`Parent process detection: PowerShell result = "${result}"`);
+            if (result && /^\d+$/.test(result)) {
+              return parseInt(result, 10);
+            }
+          } finally {
+            try {
+              fs.unlinkSync(tempFile);
+            } catch (e) {
+            }
+          }
+        } catch (e) {
+          this.log(`Parent process detection failed: ${e.message}`);
+        }
+        return null;
+      }
+      /**
+       * Check if CDP port is active
        */
       async isCDPAvailable() {
-        for (let port = BASE_PORT - PORT_RANGE; port <= BASE_PORT + PORT_RANGE; port++) {
-          try {
-            const pages = await this._getPages(port);
-            if (pages.length > 0) return true;
-          } catch (e) {
-          }
+        if (!this.targetPort) {
+          this.log("isCDPAvailable: No target port identified. CDP unavailable.");
+          return false;
         }
+        this.log(`isCDPAvailable: Checking target port ${this.targetPort}...`);
+        try {
+          const pages = await this._getPages(this.targetPort);
+          if (pages.length > 0) {
+            this.log(`isCDPAvailable: Found active pages on port ${this.targetPort}`);
+            return true;
+          }
+        } catch (e) {
+        }
+        this.log(`isCDPAvailable: Target port ${this.targetPort} not responding or valid`);
         return false;
       }
       /**
        * Start/maintain the CDP connection and injection loop
        */
       async start(config) {
+        if (!this.targetPort) {
+          this.log("Start: No target port identified. Aborting.");
+          return;
+        }
         this.isEnabled = true;
-        this.log(`Scanning ports ${BASE_PORT - PORT_RANGE} to ${BASE_PORT + PORT_RANGE}...`);
-        for (let port = BASE_PORT - PORT_RANGE; port <= BASE_PORT + PORT_RANGE; port++) {
-          try {
-            const pages = await this._getPages(port);
-            for (const page of pages) {
-              const id = `${port}:${page.id}`;
-              if (!this.connections.has(id)) {
-                await this._connect(id, page.webSocketDebuggerUrl);
-              }
-              await this._inject(id, config);
+        this.log(`Start: Connecting to port ${this.targetPort}...`);
+        try {
+          const pages = await this._getPages(this.targetPort);
+          for (const page of pages) {
+            const id = `${this.targetPort}:${page.id}`;
+            if (!this.connections.has(id)) {
+              await this._connect(id, page.webSocketDebuggerUrl);
             }
-          } catch (e) {
+            await this._inject(id, config);
           }
+        } catch (e) {
+          this.log(`Start: Connection failed: ${e.message}`);
         }
       }
       async stop() {
@@ -4564,12 +4763,23 @@ var require_relauncher = __commonJS({
        */
       async checkShortcutFlag() {
         const args = process.argv.join(" ");
-        return args.includes("--remote-debugging-port=9000");
+        return /--remote-debugging-port=\d+/.test(args);
       }
       /**
        * Modify the primary launch shortcut for the current platform
+       * DISABLED: Returns 'SKIPPED' to avoid modifying system shortcuts
        */
       async modifyShortcut() {
+        const ideName = this.getIdeName();
+        const selection = await vscode2.window.showInformationMessage(
+          `Auto Accept needs to modify your ${ideName} shortcut to enable connection. This adds the "--remote-debugging-port" flag so the extension can see the IDE.`,
+          { modal: true },
+          "Proceed"
+        );
+        if (selection !== "Proceed") {
+          this.log("User cancelled shortcut modification.");
+          return "CANCELLED";
+        }
         try {
           if (this.platform === "win32") return await this._modifyWindowsShortcut();
           if (this.platform === "darwin") return await this._modifyMacOSShortcut() ? "MODIFIED" : "FAILED";
@@ -4596,32 +4806,58 @@ $TargetFolders = @(
     [System.IO.Path]::Combine($env:USERPROFILE, "Desktop")
 )
 
-# Search ONLY for the current IDE variant
-$SearchPatterns = @("*${ideName}*")
+# Search ONLY for the exact IDE shortcut
+$SearchPatterns = @("${ideName}.lnk")
 
 $anyModified = $false
 $anyReady = $false
+$targetPort = 9000
 
 foreach ($folder in $TargetFolders) {
     if (Test-Path $folder) {
         Write-Output "DEBUG: Searching folder: $folder"
         foreach ($pattern in $SearchPatterns) {
-            $files = Get-ChildItem -Path $folder -Filter "$pattern.lnk" -Recurse
+            $files = Get-ChildItem -Path $folder -Filter "$pattern.lnk" -Recurse -ErrorAction SilentlyContinue
             foreach ($file in $files) {
                 Write-Output "DEBUG: Found shortcut: $($file.FullName)"
                 try {
                     $shortcut = $WshShell.CreateShortcut($file.FullName)
-                    if ($shortcut.Arguments -notlike "*--remote-debugging-port=9000*") {
-                        if ($shortcut.Arguments -match "--remote-debugging-port=\\d+") {
-                            $shortcut.Arguments = $shortcut.Arguments -replace "--remote-debugging-port=\\d+", "--remote-debugging-port=9000"
+                    $args = $shortcut.Arguments
+                    
+                    # --- Port Calculation Logic ---
+                    $portToUse = 9000
+                    if ($args -match '--user-data-dir=["'']?([^"''s]+)["'']?') {
+                        $profilePath = $Matches[1]
+                        Write-Output "DEBUG: Found user-data-dir: $profilePath"
+                        
+                        # Calculate stable hash for port 9001-9050
+                        $md5 = [System.Security.Cryptography.MD5]::Create()
+                        $pathBytes = [System.Text.Encoding]::UTF8.GetBytes($profilePath)
+                        $hashBytes = $md5.ComputeHash($pathBytes)
+                        # Use first 2 bytes to get a number
+                        $val = [BitConverter]::ToUInt16($hashBytes, 0)
+                        $portToUse = 9001 + ($val % 50)
+                        Write-Output "DEBUG: Calculated dynamic port: $portToUse"
+                    } else {
+                        Write-Output "DEBUG: No user-data-dir found, using default port 9000"
+                    }
+                    
+                    $targetPort = $portToUse
+                    $portFlag = "--remote-debugging-port=$portToUse"
+
+                    if ($args -notlike "*--remote-debugging-port=$portToUse*") {
+                        # Remove existing port flag if any (different port)
+                        if ($args -match "--remote-debugging-port=\\d+") {
+                            $shortcut.Arguments = $args -replace "--remote-debugging-port=\\d+", $portFlag
                         } else {
-                            $shortcut.Arguments = "--remote-debugging-port=9000 " + $shortcut.Arguments
+                            $shortcut.Arguments = "$portFlag " + $args
                         }
+                        
                         $shortcut.Save()
-                        Write-Output "DEBUG: SUCCESSFULLY MODIFIED: $($file.FullName)"
+                        Write-Output "DEBUG: SUCCESSFULLY MODIFIED: $($file.FullName) to use port $portToUse"
                         $anyModified = $true
                     } else {
-                        Write-Output "DEBUG: Flag already present in: $($file.FullName)"
+                        Write-Output "DEBUG: Correct flag already present in: $($file.FullName)"
                         $anyReady = $true
                     }
                 } catch {
@@ -4746,7 +4982,6 @@ var backgroundModeEnabled = false;
 var BACKGROUND_DONT_SHOW_KEY = "auto-accept-background-dont-show";
 var BACKGROUND_MODE_KEY = "auto-accept-background-mode";
 var VERSION_7_0_KEY = "auto-accept-version-7.0-notification-shown";
-var RELEASY_PROMO_KEY = "auto-accept-releasy-promo-shown";
 var pollTimer;
 var statsCollectionTimer;
 var statusBarItem;
@@ -4800,6 +5035,13 @@ async function activate(context) {
   try {
     isEnabled = context.globalState.get(GLOBAL_STATE_KEY, false);
     isPro = context.globalState.get(PRO_STATE_KEY, false);
+    const config = vscode.workspace.getConfiguration("autoAccept");
+    const localVipOverride = config.get("localVipOverride", false);
+    const configCdpPort = config.get("cdpPort", null);
+    if (localVipOverride) {
+      isPro = true;
+      log("localVipOverride is enabled - forcing Pro mode");
+    }
     if (isPro) {
       pollFrequency = context.globalState.get(FREQ_STATE_KEY, 1e3);
     } else {
@@ -4821,22 +5063,24 @@ async function activate(context) {
       "chmod -R 777 /"
     ];
     bannedCommands = context.globalState.get(BANNED_COMMANDS_KEY, defaultBannedCommands);
-    verifyLicense(context).then((isValid) => {
-      if (isPro !== isValid) {
-        isPro = isValid;
-        context.globalState.update(PRO_STATE_KEY, isValid);
-        log(`License re-verification: Updated Pro status to ${isValid}`);
-        if (cdpHandler && cdpHandler.setProStatus) {
-          cdpHandler.setProStatus(isValid);
-        }
-        if (!isValid) {
-          pollFrequency = 300;
-          if (backgroundModeEnabled) {
+    if (!localVipOverride) {
+      verifyLicense(context).then((isValid) => {
+        if (isPro !== isValid) {
+          isPro = isValid;
+          context.globalState.update(PRO_STATE_KEY, isValid);
+          log(`License re-verification: Updated Pro status to ${isValid}`);
+          if (cdpHandler && cdpHandler.setProStatus) {
+            cdpHandler.setProStatus(isValid);
           }
+          if (!isValid) {
+            pollFrequency = 300;
+            if (backgroundModeEnabled) {
+            }
+          }
+          updateStatusBar();
         }
-        updateStatusBar();
-      }
-    });
+      });
+    }
     currentIDE = detectIDE();
     outputChannel = vscode.window.createOutputChannel("Auto Accept");
     context.subscriptions.push(outputChannel);
@@ -4854,7 +5098,7 @@ async function activate(context) {
     try {
       const { CDPHandler } = require_cdp_handler();
       const { Relauncher } = require_relauncher();
-      cdpHandler = new CDPHandler(log);
+      cdpHandler = new CDPHandler(log, { cdpPort: configCdpPort });
       relauncher = new Relauncher(log);
       log(`CDP handlers initialized for ${currentIDE}.`);
     } catch (err) {
@@ -4888,6 +5132,9 @@ async function activate(context) {
           vscode.window.showErrorMessage("Failed to load Settings Panel.");
         }
       }),
+      vscode.commands.registerCommand("auto-accept.getCdpPort", () => {
+        return cdpHandler ? cdpHandler.targetPort : null;
+      }),
       vscode.commands.registerCommand("auto-accept.activatePro", () => handleProActivation(context))
     );
     const uriHandler = {
@@ -4907,7 +5154,6 @@ async function activate(context) {
       log(`Error in environment check: ${err.message}`);
     }
     showVersionNotification(context);
-    showReleasyCrossPromo(context);
     log("Auto Accept: Activation complete");
   } catch (error) {
     console.error("ACTIVATION CRITICAL FAILURE:", error);
@@ -4951,7 +5197,9 @@ async function handleToggle(context) {
   log("=== handleToggle CALLED ===");
   log(`  Previous isEnabled: ${isEnabled}`);
   try {
+    log("handleToggle: Checking CDP availability...");
     const cdpAvailable = cdpHandler ? await cdpHandler.isCDPAvailable() : false;
+    log(`handleToggle: cdpAvailable = ${cdpAvailable}`);
     if (!isEnabled && !cdpAvailable && relauncher) {
       log("Auto Accept: CDP not available. Prompting for setup/relaunch.");
       await relauncher.ensureCDPAndRelaunch();
@@ -5036,8 +5284,7 @@ async function handleBackgroundToggle(context) {
       "Turn on Background Mode?\n\nThis lets Auto Accept work on all your open chats at once. It will switch between tabs to click Accept for you.\n\nYou might see tabs change quickly while it works.",
       { modal: true },
       "Enable",
-      "Don't Show Again & Enable",
-      "Cancel"
+      "Don't Show Again & Enable"
     );
     if (choice === "Cancel" || !choice) {
       log("Background mode cancelled by user");
@@ -5465,37 +5712,6 @@ ${body}`,
   if (selection === btnDashboard) {
     const panel = getSettingsPanel();
     if (panel) panel.createOrShow(context.extensionUri, context);
-  }
-}
-async function showReleasyCrossPromo(context) {
-  const hasShown = context.globalState.get(RELEASY_PROMO_KEY, false);
-  if (hasShown) return;
-  const stats = context.globalState.get(ROI_STATS_KEY, { sessionsThisWeek: 0 });
-  const totalSessions = stats.sessionsThisWeek || 0;
-  if (totalSessions < 3) return;
-  await context.globalState.update(RELEASY_PROMO_KEY, true);
-  const title = "\u{1F389} New from the Auto Accept team";
-  const body = `Releasy AI \u2014 Marketing for Developers
-
-Turn your GitHub commits into Reddit posts automatically.
-
-\u2022 AI analyzes your changes
-\u2022 Generates engaging posts
-\u2022 Auto-publishes to Reddit
-
-Zero effort marketing for your side projects.`;
-  const selection = await vscode.window.showInformationMessage(
-    `${title}
-
-${body}`,
-    { modal: true },
-    "Check it out",
-    "Maybe later"
-  );
-  if (selection === "Check it out") {
-    vscode.env.openExternal(
-      vscode.Uri.parse("https://releasyai.com?utm_source=auto-accept&utm_medium=extension&utm_campaign=version_promo")
-    );
   }
 }
 function deactivate() {
