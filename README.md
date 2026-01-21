@@ -1,5 +1,7 @@
 # Auto Accept for Antigravity
 
+**English** | [中文](README_CN.md)
+
 ## Run 3 AI agents in parallel. Zero babysitting.
 
 Stop watching tabs. Auto Accept keeps every Antigravity conversation moving — accepting file edits, terminal commands, and recovery prompts automatically.
