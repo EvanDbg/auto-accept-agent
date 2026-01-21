@@ -46,6 +46,12 @@ Visual indicators show conversation state:
 - ✅ Minimized/unfocused
 - ✅ Multi-instance (Smart Port Detection)
 
+### Internationalization
+- 🇺🇸 **English** (Default)
+- 🇨🇳 **Simplified Chinese** (简体中文)
+
+Auto-detects IDE language. Force specific language via `Auto Accept: Language Override` setting.
+
 ---
 
 ## Quick Start
