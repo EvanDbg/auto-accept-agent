@@ -103,6 +103,7 @@ var require_settings_panel = __commonJS({
   "settings-panel.js"(exports2, module2) {
     var vscode2 = require("vscode");
     var { STRIPE_LINKS } = require_config();
+    var Loc2 = require_localization();
     var LICENSE_API2 = "https://auto-accept-backend.onrender.com/api";
     var SettingsPanel2 = class _SettingsPanel {
       static currentPanel = void 0;
@@ -535,20 +536,20 @@ var require_settings_panel = __commonJS({
                 <div class="container">
                     <div class="prompt-card">
                         <div style="font-size: 32px; margin-bottom: 20px;">\u23F8\uFE0F</div>
-                        <div class="prompt-title">Workflow Paused</div>
+                        <div class="prompt-title">${Loc2.t("Workflow Paused")}</div>
                         <div class="prompt-text">
-                            Your Antigravity agent is waiting for approval.<br/><br/>
-                            <strong style="color: var(--accent); opacity: 1;">Pro users auto-resume 94% of these interruptions.</strong>
+                            ${Loc2.t("Your Antigravity agent is waiting for approval.")}<br/><br/>
+                            <strong style="color: var(--accent); opacity: 1;">${Loc2.t("Pro users auto-resume 94% of these interruptions.")}</strong>
                         </div>
                         <a href="${stripeLinks.MONTHLY}" class="btn-primary" style="margin-bottom: 12px;">
-                            \u{1F680} Unlock Auto-Recovery \u2014 $5/mo
+                            \u{1F680} ${Loc2.t("Unlock Auto-Recovery \u2014 $5/mo")}
                         </a>
                         <a href="${stripeLinks.YEARLY}" class="btn-primary" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);">
-                            Annual Plan \u2014 $29/year
+                            ${Loc2.t("Annual Plan \u2014 $29/year")}
                         </a>
 
                         <a class="link-secondary" onclick="dismiss()" style="margin-top: 24px; opacity: 0.6;">
-                            Continue manually for now
+                            ${Loc2.t("Continue manually for now")}
                         </a>
                     </div>
                 </div>
@@ -567,23 +568,23 @@ var require_settings_panel = __commonJS({
         <body>
             <div class="container">
                 <div class="header">
-                    <h1>Auto Accept <span class="pro-badge">Pro</span></h1>
-                    <div class="subtitle">Multi-agent automation for Antigravity & Cursor</div>
+                    <h1>Auto Accept <span class="pro-badge">${Loc2.t("Pro")}</span></h1>
+                    <div class="subtitle">${Loc2.t("Multi-agent automation for Antigravity & Cursor")}</div>
                 </div>
 
                 ${!isPro2 ? `
                 <div class="section" style="background: var(--accent-soft); border-color: var(--accent); position: relative; overflow: hidden;">
                     <div style="position: absolute; top: -20px; right: -20px; font-size: 80px; opacity: 0.05; transform: rotate(15deg);">\u{1F680}</div>
-                    <div class="section-label" style="color: white; margin-bottom: 12px; font-size: 14px;">\u{1F525} Upgrade to Pro</div>
+                    <div class="section-label" style="color: white; margin-bottom: 12px; font-size: 14px;">\u{1F525} ${Loc2.t("Upgrade to Pro")}</div>
                     <div style="font-size: 14px; line-height: 1.6; margin-bottom: 24px; color: rgba(255,255,255,0.9);">
-                        Automate up to 5 agents in parallel. Join 500+ devs saving hours every week.
+                        ${Loc2.t("Automate up to 5 agents in parallel. Join 500+ devs saving hours every week.")}
                     </div>
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
                         <a href="${stripeLinks.MONTHLY}" class="btn-primary">
-                            $5 / Month
+                            ${Loc2.t("$5 / Month")}
                         </a>
                         <a href="${stripeLinks.YEARLY}" class="btn-primary" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);">
-                            $29 / Year
+                            ${Loc2.t("$29 / Year")}
                         </a>
                     </div>
                 </div>
@@ -591,68 +592,68 @@ var require_settings_panel = __commonJS({
 
                 <div class="section">
                     <div class="section-label">
-                        <span>\u{1F4CA} IMPACT DASHBOARD</span>
-                        <span style="opacity: 0.4;">Resets Sunday</span>
+                        <span>\u{1F4CA} ${Loc2.t("IMPACT DASHBOARD")}</span>
+                        <span style="opacity: 0.4;">${Loc2.t("Resets Sunday")}</span>
                     </div>
                     <div class="impact-grid">
                         <div class="impact-card" style="border-bottom: 2px solid var(--green);">
                             <div class="stat-val" id="roiClickCount" style="color: var(--green);">0</div>
-                            <div class="stat-label">Clicks Saved</div>
+                            <div class="stat-label">${Loc2.t("Clicks Saved")}</div>
                         </div>
                         <div class="impact-card">
                             <div class="stat-val" id="roiTimeSaved">0m</div>
-                            <div class="stat-label">Time Saved</div>
+                            <div class="stat-label">${Loc2.t("Time Saved")}</div>
                         </div>
                         <div class="impact-card">
                             <div class="stat-val" id="roiSessionCount">0</div>
-                            <div class="stat-label">Sessions</div>
+                            <div class="stat-label">${Loc2.t("Sessions")}</div>
                         </div>
                         <div class="impact-card">
                             <div class="stat-val" id="roiBlockedCount" style="opacity: 0.4;">0</div>
-                            <div class="stat-label">Blocked</div>
+                            <div class="stat-label">${Loc2.t("Blocked")}</div>
                         </div>
                     </div>
                 </div>
 
                 <div class="section" id="performanceSection">
                     <div class="section-label">
-                        <span>\u26A1 Performance Mode</span>
+                        <span>\u26A1 ${Loc2.t("Performance Mode")}</span>
                         <span class="val-display" id="freqVal" style="color: var(--accent);">...</span>
                     </div>
                     <div class="${!isPro2 ? "locked" : ""}">
                         <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 8px;">
-                            <span style="font-size: 12px; opacity: 0.5;">Instant</span>
+                            <span style="font-size: 12px; opacity: 0.5;">${Loc2.t("Instant")}</span>
                             <div style="flex: 1;"><input type="range" id="freqSlider" min="200" max="3000" step="100" value="1000"></div>
-                            <span style="font-size: 12px; opacity: 0.5;">Battery Saving</span>
+                            <span style="font-size: 12px; opacity: 0.5;">${Loc2.t("Battery Saving")}</span>
                         </div>
                     </div>
-                    ${!isPro2 ? '<div class="pro-tip">Locked: Pro users get 200ms ultra-low latency mode</div>' : ""}
+                    ${!isPro2 ? `<div class="pro-tip">${Loc2.t("Locked: Pro users get 200ms ultra-low latency mode")}</div>` : ""}
                 </div>
 
                 <div class="section">
-                    <div class="section-label">\u{1F50C} CDP Connection</div>
+                    <div class="section-label">\u{1F50C} ${Loc2.t("CDP Connection")}</div>
                     <div style="font-size: 13px; opacity: 0.6; margin-bottom: 16px; line-height: 1.5;">
-                        Chrome DevTools Protocol port for communicating with Antigravity.
+                        ${Loc2.t("Chrome DevTools Protocol port for communicating with Antigravity.")}
                     </div>
                     <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 12px;">
-                        <span style="font-size: 12px; min-width: 100px;">Detected Port:</span>
+                        <span style="font-size: 12px; min-width: 100px;">${Loc2.t("Detected Port:")}</span>
                         <span id="detectedPort" style="font-family: monospace; color: var(--green);">...</span>
                     </div>
                     <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 12px;">
-                        <span style="font-size: 12px; min-width: 100px;">Override Port:</span>
+                        <span style="font-size: 12px; min-width: 100px;">${Loc2.t("Override Port:")}</span>
                         <input type="number" id="cdpPortInput" style="width: 100px; padding: 8px; border-radius: 6px; border: 1px solid var(--border); background: rgba(0,0,0,0.3); color: var(--fg); font-family: monospace;" placeholder="auto">
-                        <button id="saveCdpPortBtn" class="btn-outline" style="padding: 8px 16px;">Save</button>
-                        <button id="clearCdpPortBtn" class="btn-outline" style="padding: 8px 12px; opacity: 0.6;">Auto</button>
+                        <button id="saveCdpPortBtn" class="btn-outline" style="padding: 8px 16px;">${Loc2.t("Save")}</button>
+                        <button id="clearCdpPortBtn" class="btn-outline" style="padding: 8px 12px; opacity: 0.6;">${Loc2.t("Auto")}</button>
                     </div>
                     <div style="font-size: 11px; opacity: 0.4; margin-top: 8px;">
-                        Leave empty for auto-detection from parent process.
+                        ${Loc2.t("Leave empty for auto-detection from parent process.")}
                     </div>
                 </div>
 
                 <div class="section">
-                    <div class="section-label">\u{1F6E1}\uFE0F Safety Rules</div>
+                    <div class="section-label">\u{1F6E1}\uFE0F ${Loc2.t("Safety Rules")}</div>
                     <div style="font-size: 13px; opacity: 0.6; margin-bottom: 16px; line-height: 1.5;">
-                        Patterns that will NEVER be auto-accepted.
+                        ${Loc2.t("Patterns that will NEVER be auto-accepted.")}
                     </div>
                     <textarea id="bannedCommandsInput" 
                         placeholder="rm -rf /&#10;format c:&#10;del /f /s /q"
@@ -660,17 +661,17 @@ var require_settings_panel = __commonJS({
                     
                     <div class="${!isPro2 ? "locked" : ""}" style="display: flex; gap: 12px; margin-top: 20px;">
                         <button id="saveBannedBtn" class="btn-primary" style="flex: 2;">
-                            Update Rules
+                            ${Loc2.t("Update Rules")}
                         </button>
                         <button id="resetBannedBtn" class="btn-outline" style="flex: 1;">
-                            Reset
+                            ${Loc2.t("Reset")}
                         </button>
                     </div>
                     <div id="bannedStatus" style="font-size: 12px; margin-top: 12px; text-align: center; height: 18px;"></div>
                 </div>
 
                 <div style="text-align: center; opacity: 0.15; font-size: 10px; padding: 20px 0; letter-spacing: 1px;">
-                    REF: ${userId}
+                    ${Loc2.t("REF:")} ${userId}
                 </div>
             </div>
 
@@ -709,7 +710,7 @@ var require_settings_panel = __commonJS({
                     saveBannedBtn.addEventListener('click', () => {
                         const lines = bannedInput.value.split('\\n').map(l => l.trim()).filter(l => l.length > 0);
                         vscode.postMessage({ command: 'updateBannedCommands', commands: lines });
-                        bannedStatus.innerText = '\u2713 Safety Rules Updated';
+                        bannedStatus.innerText = '${Loc2.t("\u2713 Safety Rules Updated")}';
                         bannedStatus.style.color = 'var(--green)';
                         setTimeout(() => { bannedStatus.innerText = ''; }, 3000);
                     });
@@ -719,7 +720,7 @@ var require_settings_panel = __commonJS({
                     resetBannedBtn.addEventListener('click', () => {
                         bannedInput.value = defaultBannedCommands.join('\\n');
                         vscode.postMessage({ command: 'updateBannedCommands', commands: defaultBannedCommands });
-                        bannedStatus.innerText = '\u2713 Defaults Restored';
+                        bannedStatus.innerText = '${Loc2.t("\u2713 Defaults Restored")}';
                         bannedStatus.style.color = 'var(--accent)';
                         setTimeout(() => { bannedStatus.innerText = ''; }, 3000);
                     });
@@ -795,7 +796,7 @@ var require_settings_panel = __commonJS({
                                 detectedPortEl.innerText = msg.detectedPort;
                                 detectedPortEl.style.color = 'var(--green)';
                             } else {
-                                detectedPortEl.innerText = 'Not detected';
+                                detectedPortEl.innerText = '${Loc2.t("Not detected")}';
                                 detectedPortEl.style.color = 'var(--fg-dim)';
                             }
                         }
@@ -5790,37 +5791,37 @@ function updateStatusBar() {
   if (!statusBarItem) return;
   if (isEnabled) {
     let statusText = "ON";
-    let tooltip = `Auto Accept is running.`;
+    let tooltip = Loc.t("Auto Accept is running.");
     let bgColor = void 0;
     let icon = "$(check)";
+    let displayStatus = Loc.t("Auto Accept: ON");
     const cdpConnected = cdpHandler && cdpHandler.getConnectionCount() > 0;
     if (cdpConnected) {
-      tooltip += " (CDP Connected)";
+      tooltip += Loc.t(" (CDP Connected)");
     }
     if (isLockedOut) {
-      statusText = "PAUSED (Multi-window)";
+      displayStatus = `Auto Accept: ${Loc.t("PAUSED (Multi-window)")}`;
       bgColor = new vscode.ThemeColor("statusBarItem.warningBackground");
       icon = "$(sync~spin)";
     }
-    const statusKey = `Auto Accept: ${statusText}`;
-    statusBarItem.text = `${icon} ${Loc.t(statusKey)}`;
+    statusBarItem.text = `${icon} ${displayStatus}`;
     statusBarItem.tooltip = tooltip;
     statusBarItem.backgroundColor = bgColor;
     if (statusBackgroundItem) {
       if (backgroundModeEnabled) {
-        statusBackgroundItem.text = "$(sync~spin) Background: ON";
-        statusBackgroundItem.tooltip = "Background Mode is on. Click to turn off.";
+        statusBackgroundItem.text = `$(sync~spin) ${Loc.t("Background: ON")}`;
+        statusBackgroundItem.tooltip = Loc.t("Background Mode is on. Click to turn off.");
         statusBackgroundItem.backgroundColor = void 0;
       } else {
-        statusBackgroundItem.text = "$(globe) Background: OFF";
-        statusBackgroundItem.tooltip = "Click to turn on Background Mode (works on all your chats).";
+        statusBackgroundItem.text = `$(globe) ${Loc.t("Background: OFF")}`;
+        statusBackgroundItem.tooltip = Loc.t("Click to turn on Background Mode (works on all your chats).");
         statusBackgroundItem.backgroundColor = void 0;
       }
       statusBackgroundItem.show();
     }
   } else {
     statusBarItem.text = `$(circle-slash) ${Loc.t("Auto Accept: OFF")}`;
-    statusBarItem.tooltip = "Click to enable Auto Accept.";
+    statusBarItem.tooltip = Loc.t("Click to enable Auto Accept.");
     statusBarItem.backgroundColor = new vscode.ThemeColor("statusBarItem.warningBackground");
     if (statusBackgroundItem) {
       statusBackgroundItem.hide();
@@ -5873,7 +5874,7 @@ async function handleProActivation(context) {
         updateStatusBar();
         log("Pro Activation: SUCCESS - User is now Pro!");
         vscode.window.showInformationMessage(
-          "\u{1F389} Pro Activated! Thank you for your support. All Pro features are now unlocked.",
+          Loc.t("\u{1F389} Pro Activated! Thank you for your support. All Pro features are now unlocked."),
           "Open Dashboard"
         ).then((choice) => {
           if (choice === "Open Dashboard") {

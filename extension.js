@@ -801,36 +801,36 @@ function updateStatusBar() {
 
     if (isEnabled) {
         let statusText = 'ON';
-        let tooltip = `Auto Accept is running.`;
+        let tooltip = Loc.t('Auto Accept is running.');
         let bgColor = undefined;
         let icon = '$(check)';
+        let displayStatus = Loc.t('Auto Accept: ON');
 
         const cdpConnected = cdpHandler && cdpHandler.getConnectionCount() > 0;
 
         if (cdpConnected) {
-            tooltip += ' (CDP Connected)';
+            tooltip += Loc.t(' (CDP Connected)');
         }
 
         if (isLockedOut) {
-            statusText = 'PAUSED (Multi-window)';
+            displayStatus = `Auto Accept: ${Loc.t('PAUSED (Multi-window)')}`;
             bgColor = new vscode.ThemeColor('statusBarItem.warningBackground');
             icon = '$(sync~spin)';
         }
 
-        const statusKey = `Auto Accept: ${statusText}`;
-        statusBarItem.text = `${icon} ${Loc.t(statusKey)}`;
+        statusBarItem.text = `${icon} ${displayStatus}`;
         statusBarItem.tooltip = tooltip;
         statusBarItem.backgroundColor = bgColor;
 
         // Show Background Mode toggle when Auto Accept is ON
         if (statusBackgroundItem) {
             if (backgroundModeEnabled) {
-                statusBackgroundItem.text = '$(sync~spin) Background: ON';
-                statusBackgroundItem.tooltip = 'Background Mode is on. Click to turn off.';
+                statusBackgroundItem.text = `$(sync~spin) ${Loc.t('Background: ON')}`;
+                statusBackgroundItem.tooltip = Loc.t('Background Mode is on. Click to turn off.');
                 statusBackgroundItem.backgroundColor = undefined;
             } else {
-                statusBackgroundItem.text = '$(globe) Background: OFF';
-                statusBackgroundItem.tooltip = 'Click to turn on Background Mode (works on all your chats).';
+                statusBackgroundItem.text = `$(globe) ${Loc.t('Background: OFF')}`;
+                statusBackgroundItem.tooltip = Loc.t('Click to turn on Background Mode (works on all your chats).');
                 statusBackgroundItem.backgroundColor = undefined;
             }
             statusBackgroundItem.show();
@@ -838,7 +838,7 @@ function updateStatusBar() {
 
     } else {
         statusBarItem.text = `$(circle-slash) ${Loc.t('Auto Accept: OFF')}`;
-        statusBarItem.tooltip = 'Click to enable Auto Accept.';
+        statusBarItem.tooltip = Loc.t('Click to enable Auto Accept.');
         statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
 
         // Hide Background Mode toggle when Auto Accept is OFF
@@ -940,7 +940,7 @@ async function handleProActivation(context) {
 
                 log('Pro Activation: SUCCESS - User is now Pro!');
                 vscode.window.showInformationMessage(
-                    '🎉 Pro Activated! Thank you for your support. All Pro features are now unlocked.',
+                    Loc.t('🎉 Pro Activated! Thank you for your support. All Pro features are now unlocked.'),
                     'Open Dashboard'
                 ).then(choice => {
                     if (choice === 'Open Dashboard') {

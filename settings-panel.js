@@ -1,5 +1,6 @@
 const vscode = require('vscode');
 const { STRIPE_LINKS } = require('./config');
+const Loc = require('./utils/localization');
 
 const LICENSE_API = 'https://auto-accept-backend.onrender.com/api';
 
@@ -475,20 +476,20 @@ class SettingsPanel {
                 <div class="container">
                     <div class="prompt-card">
                         <div style="font-size: 32px; margin-bottom: 20px;">⏸️</div>
-                        <div class="prompt-title">Workflow Paused</div>
+                        <div class="prompt-title">${Loc.t('Workflow Paused')}</div>
                         <div class="prompt-text">
-                            Your Antigravity agent is waiting for approval.<br/><br/>
-                            <strong style="color: var(--accent); opacity: 1;">Pro users auto-resume 94% of these interruptions.</strong>
+                            ${Loc.t('Your Antigravity agent is waiting for approval.')}<br/><br/>
+                            <strong style="color: var(--accent); opacity: 1;">${Loc.t('Pro users auto-resume 94% of these interruptions.')}</strong>
                         </div>
                         <a href="${stripeLinks.MONTHLY}" class="btn-primary" style="margin-bottom: 12px;">
-                            🚀 Unlock Auto-Recovery — $5/mo
+                            🚀 ${Loc.t('Unlock Auto-Recovery — $5/mo')}
                         </a>
                         <a href="${stripeLinks.YEARLY}" class="btn-primary" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);">
-                            Annual Plan — $29/year
+                            ${Loc.t('Annual Plan — $29/year')}
                         </a>
 
                         <a class="link-secondary" onclick="dismiss()" style="margin-top: 24px; opacity: 0.6;">
-                            Continue manually for now
+                            ${Loc.t('Continue manually for now')}
                         </a>
                     </div>
                 </div>
@@ -509,23 +510,23 @@ class SettingsPanel {
         <body>
             <div class="container">
                 <div class="header">
-                    <h1>Auto Accept <span class="pro-badge">Pro</span></h1>
-                    <div class="subtitle">Multi-agent automation for Antigravity & Cursor</div>
+                    <h1>Auto Accept <span class="pro-badge">${Loc.t('Pro')}</span></h1>
+                    <div class="subtitle">${Loc.t('Multi-agent automation for Antigravity & Cursor')}</div>
                 </div>
 
                 ${!isPro ? `
                 <div class="section" style="background: var(--accent-soft); border-color: var(--accent); position: relative; overflow: hidden;">
                     <div style="position: absolute; top: -20px; right: -20px; font-size: 80px; opacity: 0.05; transform: rotate(15deg);">🚀</div>
-                    <div class="section-label" style="color: white; margin-bottom: 12px; font-size: 14px;">🔥 Upgrade to Pro</div>
+                    <div class="section-label" style="color: white; margin-bottom: 12px; font-size: 14px;">🔥 ${Loc.t('Upgrade to Pro')}</div>
                     <div style="font-size: 14px; line-height: 1.6; margin-bottom: 24px; color: rgba(255,255,255,0.9);">
-                        Automate up to 5 agents in parallel. Join 500+ devs saving hours every week.
+                        ${Loc.t('Automate up to 5 agents in parallel. Join 500+ devs saving hours every week.')}
                     </div>
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
                         <a href="${stripeLinks.MONTHLY}" class="btn-primary">
-                            $5 / Month
+                            ${Loc.t('$5 / Month')}
                         </a>
                         <a href="${stripeLinks.YEARLY}" class="btn-primary" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2);">
-                            $29 / Year
+                            ${Loc.t('$29 / Year')}
                         </a>
                     </div>
                 </div>
@@ -533,68 +534,68 @@ class SettingsPanel {
 
                 <div class="section">
                     <div class="section-label">
-                        <span>📊 IMPACT DASHBOARD</span>
-                        <span style="opacity: 0.4;">Resets Sunday</span>
+                        <span>📊 ${Loc.t('IMPACT DASHBOARD')}</span>
+                        <span style="opacity: 0.4;">${Loc.t('Resets Sunday')}</span>
                     </div>
                     <div class="impact-grid">
                         <div class="impact-card" style="border-bottom: 2px solid var(--green);">
                             <div class="stat-val" id="roiClickCount" style="color: var(--green);">0</div>
-                            <div class="stat-label">Clicks Saved</div>
+                            <div class="stat-label">${Loc.t('Clicks Saved')}</div>
                         </div>
                         <div class="impact-card">
                             <div class="stat-val" id="roiTimeSaved">0m</div>
-                            <div class="stat-label">Time Saved</div>
+                            <div class="stat-label">${Loc.t('Time Saved')}</div>
                         </div>
                         <div class="impact-card">
                             <div class="stat-val" id="roiSessionCount">0</div>
-                            <div class="stat-label">Sessions</div>
+                            <div class="stat-label">${Loc.t('Sessions')}</div>
                         </div>
                         <div class="impact-card">
                             <div class="stat-val" id="roiBlockedCount" style="opacity: 0.4;">0</div>
-                            <div class="stat-label">Blocked</div>
+                            <div class="stat-label">${Loc.t('Blocked')}</div>
                         </div>
                     </div>
                 </div>
 
                 <div class="section" id="performanceSection">
                     <div class="section-label">
-                        <span>⚡ Performance Mode</span>
+                        <span>⚡ ${Loc.t('Performance Mode')}</span>
                         <span class="val-display" id="freqVal" style="color: var(--accent);">...</span>
                     </div>
                     <div class="${!isPro ? 'locked' : ''}">
                         <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 8px;">
-                            <span style="font-size: 12px; opacity: 0.5;">Instant</span>
+                            <span style="font-size: 12px; opacity: 0.5;">${Loc.t('Instant')}</span>
                             <div style="flex: 1;"><input type="range" id="freqSlider" min="200" max="3000" step="100" value="1000"></div>
-                            <span style="font-size: 12px; opacity: 0.5;">Battery Saving</span>
+                            <span style="font-size: 12px; opacity: 0.5;">${Loc.t('Battery Saving')}</span>
                         </div>
                     </div>
-                    ${!isPro ? '<div class="pro-tip">Locked: Pro users get 200ms ultra-low latency mode</div>' : ''}
+                    ${!isPro ? `<div class="pro-tip">${Loc.t('Locked: Pro users get 200ms ultra-low latency mode')}</div>` : ''}
                 </div>
 
                 <div class="section">
-                    <div class="section-label">🔌 CDP Connection</div>
+                    <div class="section-label">🔌 ${Loc.t('CDP Connection')}</div>
                     <div style="font-size: 13px; opacity: 0.6; margin-bottom: 16px; line-height: 1.5;">
-                        Chrome DevTools Protocol port for communicating with Antigravity.
+                        ${Loc.t('Chrome DevTools Protocol port for communicating with Antigravity.')}
                     </div>
                     <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 12px;">
-                        <span style="font-size: 12px; min-width: 100px;">Detected Port:</span>
+                        <span style="font-size: 12px; min-width: 100px;">${Loc.t('Detected Port:')}</span>
                         <span id="detectedPort" style="font-family: monospace; color: var(--green);">...</span>
                     </div>
                     <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 12px;">
-                        <span style="font-size: 12px; min-width: 100px;">Override Port:</span>
+                        <span style="font-size: 12px; min-width: 100px;">${Loc.t('Override Port:')}</span>
                         <input type="number" id="cdpPortInput" style="width: 100px; padding: 8px; border-radius: 6px; border: 1px solid var(--border); background: rgba(0,0,0,0.3); color: var(--fg); font-family: monospace;" placeholder="auto">
-                        <button id="saveCdpPortBtn" class="btn-outline" style="padding: 8px 16px;">Save</button>
-                        <button id="clearCdpPortBtn" class="btn-outline" style="padding: 8px 12px; opacity: 0.6;">Auto</button>
+                        <button id="saveCdpPortBtn" class="btn-outline" style="padding: 8px 16px;">${Loc.t('Save')}</button>
+                        <button id="clearCdpPortBtn" class="btn-outline" style="padding: 8px 12px; opacity: 0.6;">${Loc.t('Auto')}</button>
                     </div>
                     <div style="font-size: 11px; opacity: 0.4; margin-top: 8px;">
-                        Leave empty for auto-detection from parent process.
+                        ${Loc.t('Leave empty for auto-detection from parent process.')}
                     </div>
                 </div>
 
                 <div class="section">
-                    <div class="section-label">🛡️ Safety Rules</div>
+                    <div class="section-label">🛡️ ${Loc.t('Safety Rules')}</div>
                     <div style="font-size: 13px; opacity: 0.6; margin-bottom: 16px; line-height: 1.5;">
-                        Patterns that will NEVER be auto-accepted.
+                        ${Loc.t('Patterns that will NEVER be auto-accepted.')}
                     </div>
                     <textarea id="bannedCommandsInput" 
                         placeholder="rm -rf /&#10;format c:&#10;del /f /s /q"
@@ -602,17 +603,17 @@ class SettingsPanel {
                     
                     <div class="${!isPro ? 'locked' : ''}" style="display: flex; gap: 12px; margin-top: 20px;">
                         <button id="saveBannedBtn" class="btn-primary" style="flex: 2;">
-                            Update Rules
+                            ${Loc.t('Update Rules')}
                         </button>
                         <button id="resetBannedBtn" class="btn-outline" style="flex: 1;">
-                            Reset
+                            ${Loc.t('Reset')}
                         </button>
                     </div>
                     <div id="bannedStatus" style="font-size: 12px; margin-top: 12px; text-align: center; height: 18px;"></div>
                 </div>
 
                 <div style="text-align: center; opacity: 0.15; font-size: 10px; padding: 20px 0; letter-spacing: 1px;">
-                    REF: ${userId}
+                    ${Loc.t('REF:')} ${userId}
                 </div>
             </div>
 
@@ -651,7 +652,7 @@ class SettingsPanel {
                     saveBannedBtn.addEventListener('click', () => {
                         const lines = bannedInput.value.split('\\n').map(l => l.trim()).filter(l => l.length > 0);
                         vscode.postMessage({ command: 'updateBannedCommands', commands: lines });
-                        bannedStatus.innerText = '✓ Safety Rules Updated';
+                        bannedStatus.innerText = '${Loc.t('✓ Safety Rules Updated')}';
                         bannedStatus.style.color = 'var(--green)';
                         setTimeout(() => { bannedStatus.innerText = ''; }, 3000);
                     });
@@ -661,7 +662,7 @@ class SettingsPanel {
                     resetBannedBtn.addEventListener('click', () => {
                         bannedInput.value = defaultBannedCommands.join('\\n');
                         vscode.postMessage({ command: 'updateBannedCommands', commands: defaultBannedCommands });
-                        bannedStatus.innerText = '✓ Defaults Restored';
+                        bannedStatus.innerText = '${Loc.t('✓ Defaults Restored')}';
                         bannedStatus.style.color = 'var(--accent)';
                         setTimeout(() => { bannedStatus.innerText = ''; }, 3000);
                     });
@@ -737,7 +738,7 @@ class SettingsPanel {
                                 detectedPortEl.innerText = msg.detectedPort;
                                 detectedPortEl.style.color = 'var(--green)';
                             } else {
-                                detectedPortEl.innerText = 'Not detected';
+                                detectedPortEl.innerText = '${Loc.t('Not detected')}';
                                 detectedPortEl.style.color = 'var(--fg-dim)';
                             }
                         }
