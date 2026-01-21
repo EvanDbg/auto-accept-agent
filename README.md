@@ -97,6 +97,8 @@ Auto Accept: Could not configure automatically. Please add --remote-debugging-po
 4. Custom-named shortcuts that don't match the IDE executable
 
 **Manual Fix**:
+
+#### Windows
 1. Find your IDE shortcut (Desktop or Start Menu)
 2. Right-click → **Properties**
 3. In the **Target** field, add `--remote-debugging-port=9000` after the `.exe` path:
@@ -104,6 +106,24 @@ Auto Accept: Could not configure automatically. Please add --remote-debugging-po
    "C:\...\Antigravity.exe" --remote-debugging-port=9000
    ```
 4. Click **OK** and restart the IDE
+
+#### macOS
+Launch your IDE from the terminal with the debug flag:
+```bash
+# For Antigravity
+open -a "Antigravity.app" --args --remote-debugging-port=9000
+
+# For Cursor
+open -a "Cursor.app" --args --remote-debugging-port=9000
+```
+*Tip: You can create an alias in your `.zshrc`: `alias antigravity='open -a "Antigravity" --args --remote-debugging-port=9000'`*
+
+#### Linux
+Edit your URL/Desktop entry (usually in `/usr/share/applications` or `~/.local/share/applications`):
+1. Open the `.desktop` file (e.g., `antigravity.desktop`)
+2. Find the `Exec=` line
+3. Append `--remote-debugging-port=9000` to the end
+4. Save and relaunch
 
 ---
 

@@ -107,6 +107,8 @@ Auto Accept: 无法自动配置。请手动在 Antigravity 快捷方式中添加
 4. 自定义命名的快捷方式与 IDE 可执行文件不匹配
 
 **手动修复**：
+
+#### Windows
 1. 找到你的 IDE 快捷方式（桌面或开始菜单）
 2. 右键点击 → **属性**
 3. 在 **目标** 字段中，在 `.exe` 路径后添加 `--remote-debugging-port=9000`：
@@ -114,6 +116,24 @@ Auto Accept: 无法自动配置。请手动在 Antigravity 快捷方式中添加
    "C:\...\Antigravity.exe" --remote-debugging-port=9000
    ```
 4. 点击 **确定** 并重启 IDE
+
+#### macOS
+请通过终端使用参数启动 IDE：
+```bash
+# Antigravity
+open -a "Antigravity.app" --args --remote-debugging-port=9000
+
+# Cursor
+open -a "Cursor.app" --args --remote-debugging-port=9000
+```
+*提示：您可以在 `.zshrc` 中创建别名：`alias antigravity='open -a "Antigravity" --args --remote-debugging-port=9000'`*
+
+#### Linux
+编辑您的 `.desktop` 启动文件（通常在 `/usr/share/applications` 或 `~/.local/share/applications`）：
+1. 打开 `.desktop` 文件 (例如 `antigravity.desktop`)
+2. 找到 `Exec=` 开头的那一行
+3. 在末尾添加 `--remote-debugging-port=9000`
+4. 保存并重启应用
 
 ---
 
