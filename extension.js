@@ -1,6 +1,8 @@
 const vscode = require('vscode');
 const path = require('path');
 
+const Loc = require('./utils/localization');
+
 // Lazy load SettingsPanel to avoid blocking activation
 let SettingsPanel = null;
 function getSettingsPanel() {
@@ -74,13 +76,14 @@ function detectIDE() {
 
 async function activate(context) {
     globalContext = context;
+    Loc.init(context);
     console.log('Auto Accept Extension: Activator called.');
 
     // CRITICAL: Create status bar items FIRST before anything else
     try {
         statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
         statusBarItem.command = 'auto-accept.toggle';
-        statusBarItem.text = '$(sync~spin) Auto Accept: Loading...';
+        statusBarItem.text = `$(sync~spin) ${Loc.t('Auto Accept: Loading...')}`;
         statusBarItem.tooltip = 'Auto Accept is initializing...';
         context.subscriptions.push(statusBarItem);
         statusBarItem.show();
@@ -95,7 +98,7 @@ async function activate(context) {
         // Background Mode status bar item
         statusBackgroundItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 99);
         statusBackgroundItem.command = 'auto-accept.toggleBackground';
-        statusBackgroundItem.text = '$(globe) Background: OFF';
+        statusBackgroundItem.text = `$(globe) ${Loc.t('Background: OFF')}`;
         statusBackgroundItem.tooltip = 'Background Mode (Pro) - Works on all chats';
         context.subscriptions.push(statusBackgroundItem);
         // Don't show by default - only when Auto Accept is ON
@@ -113,7 +116,7 @@ async function activate(context) {
         // Check for pending auto-enable (set after shortcut modification)
         const pendingEnable = context.globalState.get(PENDING_ENABLE_KEY, false);
         if (pendingEnable) {
-            log('Pending enable flag detected - auto-enabling Auto Accept');
+            vscode.window.showInformationMessage(`${Loc.t('Pending enable flag detected - auto-enabling Auto Accept')}`);
             isEnabled = true;
             context.globalState.update(GLOBAL_STATE_KEY, true);
             context.globalState.update(PENDING_ENABLE_KEY, false);
@@ -428,10 +431,10 @@ async function handleBackgroundToggle(context) {
 
     if (!isPro) {
         vscode.window.showInformationMessage(
-            'Background Mode is a Pro feature.',
-            'Learn More'
+            Loc.t('Background Mode is a Pro feature.'),
+            Loc.t('Learn More')
         ).then(choice => {
-            if (choice === 'Learn More') {
+            if (choice === Loc.t('Learn More')) {
                 const panel = getSettingsPanel();
                 if (panel) panel.createOrShow(context.extensionUri, context);
             }
@@ -444,14 +447,14 @@ async function handleBackgroundToggle(context) {
 
     if (!dontShowAgain && !backgroundModeEnabled) {
         // First-time enabling: Show confirmation dialog
+        const message = Loc.t('Background Mode allows Auto Accept to work across ALL browser tabs simultaneously, even when they\'re not focused. This is a Pro feature.');
+        const enable = Loc.t('Enable');
+        const dontShow = Loc.t('Don\'t Show Again & Enable');
         const choice = await vscode.window.showInformationMessage(
-            'Turn on Background Mode?\n\n' +
-            'This lets Auto Accept work on all your open chats at once. ' +
-            'It will switch between tabs to click Accept for you.\n\n' +
-            'You might see tabs change quickly while it works.',
+            message,
             { modal: true },
-            'Enable',
-            "Don't Show Again & Enable"
+            enable,
+            dontShow
         );
 
         if (choice === 'Cancel' || !choice) {
@@ -814,7 +817,8 @@ function updateStatusBar() {
             icon = '$(sync~spin)';
         }
 
-        statusBarItem.text = `${icon} Auto Accept: ${statusText}`;
+        const statusKey = `Auto Accept: ${statusText}`;
+        statusBarItem.text = `${icon} ${Loc.t(statusKey)}`;
         statusBarItem.tooltip = tooltip;
         statusBarItem.backgroundColor = bgColor;
 
@@ -833,7 +837,7 @@ function updateStatusBar() {
         }
 
     } else {
-        statusBarItem.text = '$(circle-slash) Auto Accept: OFF';
+        statusBarItem.text = `$(circle-slash) ${Loc.t('Auto Accept: OFF')}`;
         statusBarItem.tooltip = 'Click to enable Auto Accept.';
         statusBarItem.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
 

@@ -3,6 +3,88 @@ var __commonJS = (cb, mod) => function __require() {
   return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
 };
 
+// utils/localization.js
+var require_localization = __commonJS({
+  "utils/localization.js"(exports2, module2) {
+    var vscode2 = require("vscode");
+    var fs = require("fs");
+    var path2 = require("path");
+    var LocalizationManager = class {
+      constructor(context) {
+        this.context = context;
+        this.bundle = null;
+        this.language = "auto";
+        this.loaded = false;
+        this.updateLanguage();
+        if (context) {
+          context.subscriptions.push(vscode2.workspace.onDidChangeConfiguration((e) => {
+            if (e.affectsConfiguration("autoAccept.languageOverride")) {
+              this.updateLanguage();
+            }
+          }));
+        }
+      }
+      updateLanguage() {
+        const config = vscode2.workspace.getConfiguration("autoAccept");
+        const newLanguage = config.get("languageOverride") || "auto";
+        if (this.language !== newLanguage || !this.loaded) {
+          this.language = newLanguage;
+          this.loadBundle();
+        }
+      }
+      loadBundle() {
+        if (this.language === "auto" || !this.context) {
+          this.bundle = null;
+          this.loaded = true;
+          return;
+        }
+        try {
+          const bundleName = this.language === "en" ? "bundle.l10n.json" : `bundle.l10n.${this.language}.json`;
+          const bundlePath = path2.join(this.context.extensionPath, "l10n", bundleName);
+          if (fs.existsSync(bundlePath)) {
+            this.bundle = JSON.parse(fs.readFileSync(bundlePath, "utf8"));
+            console.log(`Auto Accept: Loaded language override bundle: ${bundleName}`);
+          } else {
+            console.warn(`Auto Accept: Language bundle not found: ${bundlePath}`);
+            this.bundle = null;
+          }
+        } catch (e) {
+          console.error(`Auto Accept: Failed to load language bundle: ${e.message}`);
+          this.bundle = null;
+        }
+        this.loaded = true;
+      }
+      t(message, ...args) {
+        if (this.language !== "auto" && this.bundle && this.bundle[message]) {
+          let result = this.bundle[message];
+          if (args.length > 0) {
+            args.forEach((arg, index) => {
+              result = result.replace(new RegExp(`\\{${index}\\}`, "g"), arg);
+            });
+          }
+          return result;
+        }
+        return vscode2.l10n.t(message, ...args);
+      }
+    };
+    var instance = null;
+    function init(context) {
+      instance = new LocalizationManager(context);
+      return instance;
+    }
+    function t(message, ...args) {
+      if (!instance) {
+        return vscode2.l10n.t(message, ...args);
+      }
+      return instance.t(message, ...args);
+    }
+    module2.exports = {
+      init,
+      t
+    };
+  }
+});
+
 // config.js
 var require_config = __commonJS({
   "config.js"(exports2, module2) {
@@ -4707,6 +4789,7 @@ var require_relauncher = __commonJS({
     var os = require("os");
     var fs = require("fs");
     var path2 = require("path");
+    var Loc2 = require_localization();
     var CDP_PORT = 9e3;
     var CDP_FLAG = `--remote-debugging-port=${CDP_PORT}`;
     var Relauncher = class {
@@ -4746,10 +4829,10 @@ var require_relauncher = __commonJS({
           this.log(`Failed to ensure shortcut configuration. Status: ${status}`);
           const ideName = this.getIdeName();
           vscode2.window.showErrorMessage(
-            `Auto Accept: Could not configure automatically. Please add --remote-debugging-port=9000 to your ${ideName} shortcut manually, then restart.`,
-            "View Help"
+            Loc2.t("Auto Accept: Could not configure automatically. Please add --remote-debugging-port=9000 to your {0} shortcut manually, then restart.", ideName),
+            Loc2.t("View Help")
           ).then((selection) => {
-            if (selection === "View Help") {
+            if (selection === Loc2.t("View Help")) {
               vscode2.env.openExternal(vscode2.Uri.parse("https://github.com/Antigravity-AI/auto-accept#background-mode-setup"));
             }
           });
@@ -4770,11 +4853,11 @@ var require_relauncher = __commonJS({
       async modifyShortcut() {
         const ideName = this.getIdeName();
         const selection = await vscode2.window.showInformationMessage(
-          `Auto Accept needs to modify your ${ideName} shortcut to enable connection. This adds the "--remote-debugging-port" flag so the extension can see the IDE.`,
+          Loc2.t('Auto Accept needs to modify your {0} shortcut to enable connection. This adds the "--remote-debugging-port" flag so the extension can see the IDE.', ideName),
           { modal: true },
-          "Proceed"
+          Loc2.t("Proceed")
         );
-        if (selection !== "Proceed") {
+        if (selection !== Loc2.t("Proceed")) {
           this.log("User cancelled shortcut modification.");
           return "CANCELLED";
         }
@@ -4926,20 +5009,20 @@ ${result}`);
         let message = "";
         let detail = "";
         if (status === "modified") {
-          message = `\u2705 Auto Accept: \u5DF2\u4FEE\u6539 ${items.length} \u4E2A\u5FEB\u6377\u65B9\u5F0F`;
-          detail = items.map((i) => `\u2022 ${i.name} \u2192 \u7AEF\u53E3 ${i.port}`).join("\n");
+          message = Loc2.t("\u2705 Auto Accept: Modified {0} shortcuts", items.length);
+          detail = items.map((i) => Loc2.t("\u2022 {0} \u2192 Port {1}", i.name, i.port)).join("\n");
         } else {
-          message = `\u2705 Auto Accept: ${items.length} \u4E2A\u5FEB\u6377\u65B9\u5F0F\u5DF2\u5C31\u7EEA`;
-          detail = items.map((i) => `\u2022 ${i.name} \u2192 \u7AEF\u53E3 ${i.port}`).join("\n");
+          message = Loc2.t("\u2705 Auto Accept: {0} shortcuts ready", items.length);
+          detail = items.map((i) => Loc2.t("\u2022 {0} \u2192 Port {1}", i.name, i.port)).join("\n");
         }
         vscode2.window.showInformationMessage(
           `${message}
 
 ${detail}
 
-\u8BF7\u5B8C\u5168\u5173\u95ED\u5E76\u91CD\u542F ${ideName} \u4EE5\u5E94\u7528\u66F4\u6539\u3002`,
+${Loc2.t("Please close and restart {0} completely to apply changes.", ideName)}`,
           { modal: true },
-          "Got it"
+          Loc2.t("Got it")
         ).then(() => {
           if (this.context && this.context.globalState) {
             this.context.globalState.update("auto-accept-pending-enable", true);
@@ -5117,6 +5200,7 @@ open - a "${foundAppPath}" --args--remote - debugging - port=9000 "$@"`;
 // extension.js
 var vscode = require("vscode");
 var path = require("path");
+var Loc = require_localization();
 var SettingsPanel = null;
 function getSettingsPanel() {
   if (!SettingsPanel) {
@@ -5173,11 +5257,12 @@ function detectIDE() {
 }
 async function activate(context) {
   globalContext = context;
+  Loc.init(context);
   console.log("Auto Accept Extension: Activator called.");
   try {
     statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
     statusBarItem.command = "auto-accept.toggle";
-    statusBarItem.text = "$(sync~spin) Auto Accept: Loading...";
+    statusBarItem.text = `$(sync~spin) ${Loc.t("Auto Accept: Loading...")}`;
     statusBarItem.tooltip = "Auto Accept is initializing...";
     context.subscriptions.push(statusBarItem);
     statusBarItem.show();
@@ -5189,7 +5274,7 @@ async function activate(context) {
     statusSettingsItem.show();
     statusBackgroundItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 99);
     statusBackgroundItem.command = "auto-accept.toggleBackground";
-    statusBackgroundItem.text = "$(globe) Background: OFF";
+    statusBackgroundItem.text = `$(globe) ${Loc.t("Background: OFF")}`;
     statusBackgroundItem.tooltip = "Background Mode (Pro) - Works on all chats";
     context.subscriptions.push(statusBackgroundItem);
     console.log("Auto Accept: Status bar items created and shown.");
@@ -5201,7 +5286,7 @@ async function activate(context) {
     isPro = context.globalState.get(PRO_STATE_KEY, false);
     const pendingEnable = context.globalState.get(PENDING_ENABLE_KEY, false);
     if (pendingEnable) {
-      log("Pending enable flag detected - auto-enabling Auto Accept");
+      vscode.window.showInformationMessage(`${Loc.t("Pending enable flag detected - auto-enabling Auto Accept")}`);
       isEnabled = true;
       context.globalState.update(GLOBAL_STATE_KEY, true);
       context.globalState.update(PENDING_ENABLE_KEY, false);
@@ -5439,10 +5524,10 @@ async function handleBackgroundToggle(context) {
   log("Background toggle clicked");
   if (!isPro) {
     vscode.window.showInformationMessage(
-      "Background Mode is a Pro feature.",
-      "Learn More"
+      Loc.t("Background Mode is a Pro feature."),
+      Loc.t("Learn More")
     ).then((choice) => {
-      if (choice === "Learn More") {
+      if (choice === Loc.t("Learn More")) {
         const panel = getSettingsPanel();
         if (panel) panel.createOrShow(context.extensionUri, context);
       }
@@ -5451,11 +5536,14 @@ async function handleBackgroundToggle(context) {
   }
   const dontShowAgain = context.globalState.get(BACKGROUND_DONT_SHOW_KEY, false);
   if (!dontShowAgain && !backgroundModeEnabled) {
+    const message = Loc.t("Background Mode allows Auto Accept to work across ALL browser tabs simultaneously, even when they're not focused. This is a Pro feature.");
+    const enable = Loc.t("Enable");
+    const dontShow = Loc.t("Don't Show Again & Enable");
     const choice = await vscode.window.showInformationMessage(
-      "Turn on Background Mode?\n\nThis lets Auto Accept work on all your open chats at once. It will switch between tabs to click Accept for you.\n\nYou might see tabs change quickly while it works.",
+      message,
       { modal: true },
-      "Enable",
-      "Don't Show Again & Enable"
+      enable,
+      dontShow
     );
     if (choice === "Cancel" || !choice) {
       log("Background mode cancelled by user");
@@ -5714,7 +5802,8 @@ function updateStatusBar() {
       bgColor = new vscode.ThemeColor("statusBarItem.warningBackground");
       icon = "$(sync~spin)";
     }
-    statusBarItem.text = `${icon} Auto Accept: ${statusText}`;
+    const statusKey = `Auto Accept: ${statusText}`;
+    statusBarItem.text = `${icon} ${Loc.t(statusKey)}`;
     statusBarItem.tooltip = tooltip;
     statusBarItem.backgroundColor = bgColor;
     if (statusBackgroundItem) {
@@ -5730,7 +5819,7 @@ function updateStatusBar() {
       statusBackgroundItem.show();
     }
   } else {
-    statusBarItem.text = "$(circle-slash) Auto Accept: OFF";
+    statusBarItem.text = `$(circle-slash) ${Loc.t("Auto Accept: OFF")}`;
     statusBarItem.tooltip = "Click to enable Auto Accept.";
     statusBarItem.backgroundColor = new vscode.ThemeColor("statusBarItem.warningBackground");
     if (statusBackgroundItem) {

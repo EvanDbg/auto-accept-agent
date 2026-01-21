@@ -2,7 +2,7 @@
     "name": "auto-accept-agent",
     "displayName": "%ext.displayName%",
     "description": "%ext.description%",
-    "version": "8.6.0",
+    "version": "8.6.1",
     "publisher": "MunKhin",
     "icon": "media/icon.png",
     "repository": {
@@ -62,6 +62,16 @@
                     "type": "boolean",
                     "default": false,
                     "description": "%config.localVipOverride.description%"
+                },
+                "autoAccept.languageOverride": {
+                    "type": "string",
+                    "enum": [
+                        "auto",
+                        "en",
+                        "zh-cn"
+                    ],
+                    "default": "auto",
+                    "description": "%config.languageOverride.description%"
                 }
             }
         }

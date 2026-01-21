@@ -3,6 +3,7 @@ const { execSync, spawn } = require('child_process');
 const os = require('os');
 const fs = require('fs');
 const path = require('path');
+const Loc = require('../utils/localization');
 
 const CDP_PORT = 9000;
 const CDP_FLAG = `--remote-debugging-port=${CDP_PORT}`;
@@ -54,10 +55,10 @@ class Relauncher {
             this.log(`Failed to ensure shortcut configuration. Status: ${status}`);
             const ideName = this.getIdeName();
             vscode.window.showErrorMessage(
-                `Auto Accept: Could not configure automatically. Please add --remote-debugging-port=9000 to your ${ideName} shortcut manually, then restart.`,
-                'View Help'
+                Loc.t('Auto Accept: Could not configure automatically. Please add --remote-debugging-port=9000 to your {0} shortcut manually, then restart.', ideName),
+                Loc.t('View Help')
             ).then(selection => {
-                if (selection === 'View Help') {
+                if (selection === Loc.t('View Help')) {
                     vscode.env.openExternal(vscode.Uri.parse('https://github.com/Antigravity-AI/auto-accept#background-mode-setup'));
                 }
             });
@@ -84,12 +85,12 @@ class Relauncher {
         const ideName = this.getIdeName();
         // 1. Confirm with user
         const selection = await vscode.window.showInformationMessage(
-            `Auto Accept needs to modify your ${ideName} shortcut to enable connection. This adds the "--remote-debugging-port" flag so the extension can see the IDE.`,
+            Loc.t('Auto Accept needs to modify your {0} shortcut to enable connection. This adds the "--remote-debugging-port" flag so the extension can see the IDE.', ideName),
             { modal: true },
-            'Proceed'
+            Loc.t('Proceed')
         );
 
-        if (selection !== 'Proceed') {
+        if (selection !== Loc.t('Proceed')) {
             this.log('User cancelled shortcut modification.');
             return 'CANCELLED';
         }
@@ -261,17 +262,17 @@ if ($modifiedList.Count -gt 0) {
         let detail = '';
 
         if (status === 'modified') {
-            message = `✅ Auto Accept: 已修改 ${items.length} 个快捷方式`;
-            detail = items.map(i => `• ${i.name} → 端口 ${i.port}`).join('\n');
+            message = Loc.t('✅ Auto Accept: Modified {0} shortcuts', items.length);
+            detail = items.map(i => Loc.t('• {0} → Port {1}', i.name, i.port)).join('\n');
         } else {
-            message = `✅ Auto Accept: ${items.length} 个快捷方式已就绪`;
-            detail = items.map(i => `• ${i.name} → 端口 ${i.port}`).join('\n');
+            message = Loc.t('✅ Auto Accept: {0} shortcuts ready', items.length);
+            detail = items.map(i => Loc.t('• {0} → Port {1}', i.name, i.port)).join('\n');
         }
 
         vscode.window.showInformationMessage(
-            `${message}\n\n${detail}\n\n请完全关闭并重启 ${ideName} 以应用更改。`,
+            `${message}\n\n${detail}\n\n${Loc.t('Please close and restart {0} completely to apply changes.', ideName)}`,
             { modal: true },
-            'Got it'
+            Loc.t('Got it')
         ).then(() => {
             // Set pending enable flag so Auto Accept auto-enables after restart
             if (this.context && this.context.globalState) {
