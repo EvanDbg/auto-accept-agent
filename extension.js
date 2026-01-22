@@ -558,12 +558,17 @@ async function syncSessions() {
     if (cdpHandler && !isLockedOut) {
         log(`CDP: Syncing sessions (Mode: ${backgroundModeEnabled ? 'Background' : 'Simple'})...`);
         try {
+            // Read autoAcceptFileEdits config
+            const config = vscode.workspace.getConfiguration('autoAccept');
+            const autoAcceptFileEdits = config.get('autoAcceptFileEdits', true);
+
             await cdpHandler.start({
                 isPro,
                 isBackgroundMode: backgroundModeEnabled,
                 pollInterval: pollFrequency,
                 ide: currentIDE,
-                bannedCommands: bannedCommands
+                bannedCommands: bannedCommands,
+                autoAcceptFileEdits: autoAcceptFileEdits
             });
         } catch (err) {
             log(`CDP: Sync error: ${err.message}`);

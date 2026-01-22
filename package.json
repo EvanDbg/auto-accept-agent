@@ -72,6 +72,11 @@
                     ],
                     "default": "auto",
                     "description": "%config.languageOverride.description%"
+                },
+                "autoAccept.autoAcceptFileEdits": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "%config.autoAcceptFileEdits.description%"
                 }
             }
         }

@@ -662,6 +662,16 @@
         if (rejects.some(r => text.includes(r))) return false;
         if (!patterns.some(p => text.includes(p))) return false;
 
+        // NEW: Check if this is a file edit button (Accept All) and user disabled auto-accept
+        const isFileEditButton = text.includes('accept all') || text.includes('accept file') || (text.includes('accept') && !text.includes('run'));
+        if (isFileEditButton) {
+            const state = window.__autoAcceptState;
+            if (state && state.autoAcceptFileEdits === false) {
+                log(`[Config] Skipping file edit button: "${text}" - autoAcceptFileEdits is disabled`);
+                return false;
+            }
+        }
+
         // Check if this is a command execution button by looking for "run command" or similar
         const isCommandButton = text.includes('run command') || text.includes('execute') || text.includes('run');
 
@@ -725,7 +735,7 @@
             if (isAcceptButton(el)) {
                 const buttonText = (el.textContent || "").trim();
                 const lowerText = buttonText.toLowerCase();
-                
+
                 // --- SPECIAL HANDLING FOR RETRY ON ERROR ---
                 if (lowerText.includes('retry')) {
                     if (findNearbyErrorText(el)) {
@@ -978,6 +988,7 @@
             state.isRunning = true;
             state.currentMode = ide;
             state.isBackgroundMode = isBG;
+            state.autoAcceptFileEdits = config.autoAcceptFileEdits !== false; // Default to true
             state.sessionID++;
             const sid = state.sessionID;
 

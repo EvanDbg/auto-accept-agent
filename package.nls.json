@@ -6,5 +6,6 @@
     "cmd.openSettings": "Auto Accept: Settings & Pro",
     "config.cdpPort.description": "Chrome DevTools Protocol port. Set to null to auto-detect from parent process --remote-debugging-port. If detection fails, ports 8997-9003 will be scanned.",
     "config.localVipOverride.description": "Force local VIP mode (for testing). Skips online license verification when enabled.",
-    "config.languageOverride.description": "Override language setting (for testing). Requires restart."
+    "config.languageOverride.description": "Override language setting (for testing). Requires restart.",
+    "config.autoAcceptFileEdits.description": "Automatically accept file edits ('Accept All' button). Disable to manually review code changes."
 }
