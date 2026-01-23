@@ -663,7 +663,8 @@
         if (!patterns.some(p => text.includes(p))) return false;
 
         // NEW: Check if this is a file edit button (Accept All) and user disabled auto-accept
-        const isFileEditButton = text.includes('accept all') || text.includes('accept file') || (text.includes('accept') && !text.includes('run'));
+        // IMPORTANT: Only match explicit "accept all" text, NOT generic "accept" (used for terminal commands)
+        const isFileEditButton = text.includes('accept all') || text.includes('accept file');
         if (isFileEditButton) {
             const state = window.__autoAcceptState;
             if (state && state.autoAcceptFileEdits === false) {
