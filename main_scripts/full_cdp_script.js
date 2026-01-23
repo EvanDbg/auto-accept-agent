@@ -685,9 +685,28 @@
             }
         }
 
+        // Enhanced visibility check - prevent clicking invisible/off-screen elements
         const style = window.getComputedStyle(el);
         const rect = el.getBoundingClientRect();
-        return style.display !== 'none' && rect.width > 0 && style.pointerEvents !== 'none' && !el.disabled;
+
+        // Basic visibility checks
+        if (style.display === 'none') return false;
+        if (style.visibility === 'hidden') return false;
+        if (parseFloat(style.opacity) === 0) return false;
+        if (style.pointerEvents === 'none') return false;
+        if (el.disabled) return false;
+
+        // Size check - must have actual dimensions
+        if (rect.width <= 0 || rect.height <= 0) return false;
+
+        // Viewport check - must be at least partially visible on screen
+        const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
+        const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+        const isInViewport = rect.bottom > 0 && rect.top < viewportHeight &&
+            rect.right > 0 && rect.left < viewportWidth;
+        if (!isInViewport) return false;
+
+        return true;
     }
 
     /**
