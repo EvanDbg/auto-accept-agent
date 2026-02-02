@@ -234,11 +234,27 @@
         return docs;
     };
 
-    const queryAll = (selector) => {
+    const queryAll = (selector, scopeSelector = null) => {
         const results = [];
-        getDocuments().forEach(doc => {
-            try { results.push(...Array.from(doc.querySelectorAll(selector))); } catch (e) { }
-        });
+        
+        if (scopeSelector) {
+            // 限制搜索范围到指定的 panel
+            try {
+                const scopeElement = document.querySelector(scopeSelector);
+                if (scopeElement) {
+                    // 只在指定范围内搜索
+                    const scopeDoc = scopeElement.contentDocument || scopeElement.contentWindow?.document;
+                    const scopedResults = scopeDoc.querySelectorAll(selector);
+                    results.push(...Array.from(scopedResults));
+                }
+            } catch (e) { }
+        } else {
+            // 原有逻辑：搜索所有文档
+            getDocuments().forEach(doc => {
+                try { results.push(...Array.from(doc.querySelectorAll(selector))); } catch (e) { }
+            });
+        }
+        
         return results;
     };
 
@@ -564,7 +580,9 @@
 
         const result = commandText.trim().toLowerCase();
         if (result.length > 0) {
-            log(`[BannedCmd] Extracted command text (${result.length} chars): "${result.substring(0, 150)}..."`);
+            // 显示更多字符用于调试，但限制长度避免日志过长
+            const displayText = result.length > 100 ? result.substring(0, 100) + "..." : result;
+            log(`[BannedCmd] Extracted command text (${result.length} chars): "${displayText}"`);
         }
         return result;
     }
@@ -889,9 +907,9 @@
         });
     }
 
-    async function performClick(selectors) {
+    async function performClick(selectors, panelSelector = null) {
         const found = [];
-        selectors.forEach(s => queryAll(s).forEach(el => found.push(el)));
+        selectors.forEach(s => queryAll(s, panelSelector).forEach(el => found.push(el)));
         let clicked = 0;
         let verified = 0;
         const uniqueFound = [...new Set(found)];
@@ -1010,7 +1028,7 @@
             cycle++;
             log(`[Loop] Cycle ${cycle}: Starting...`);
 
-            const clicked = await performClick(['button', '[class*="button"]', '[class*="anysphere"]']);
+            const clicked = await performClick(['button', '[class*="button"]', '[class*="anysphere"]'], '#workbench\\.parts\\.auxiliarybar');
             log(`[Loop] Cycle ${cycle}: Clicked ${clicked} buttons`);
 
             await new Promise(r => setTimeout(r, 800));
@@ -1079,7 +1097,7 @@
             let clicked = 0;
             if (!hasBadge) {
                 // Click accept/run buttons (Antigravity specific selectors)
-                clicked = await performClick(['.bg-ide-button-background']);
+                clicked = await performClick(['.bg-ide-button-background'], '#antigravity\\.agentPanel');
                 log(`[Loop] Cycle ${cycle}: Clicked ${clicked} accept buttons`);
             } else {
                 log(`[Loop] Cycle ${cycle}: Skipping clicks - conversation is DONE (has badge)`);
@@ -1207,9 +1225,16 @@
 
             const state = window.__autoAcceptState;
 
-            // Skip restart only if EXACTLY the same config
-            if (state.isRunning && state.currentMode === ide && state.isBackgroundMode === isBG) {
-                log(`Already running with same config, skipping`);
+            // Skip restart only if EXACTLY the same config AND not too recent
+            const lastStart = state.lastStartTime || 0;
+            const now = Date.now();
+            const recentThreshold = 3000; // 3 seconds
+            
+            if (state.isRunning && 
+                state.currentMode === ide && 
+                state.isBackgroundMode === isBG &&
+                (now - lastStart) < recentThreshold) {
+                log(`Already running with same config recently, skipping`);
                 return;
             }
 
@@ -1223,6 +1248,7 @@
             state.currentMode = ide;
             state.isBackgroundMode = isBG;
             state.autoAcceptFileEdits = config.autoAcceptFileEdits !== false; // Default to true
+            state.lastStartTime = Date.now();
             state.sessionID++;
             const sid = state.sessionID;
 
@@ -1248,9 +1274,36 @@
                 hideOverlay();
                 log(`Starting static poll loop...`);
                 (async function staticLoop() {
+                    let noClickCount = 0;
+                    const baseInterval = config.pollInterval || 1000;
+                    const maxInterval = 5000; // 最大5秒间隔
+                    
                     while (state.isRunning && state.sessionID === sid) {
-                        performClick(['button', '[class*="button"]', '[class*="anysphere"]']);
-                        await new Promise(r => setTimeout(r, config.pollInterval || 1000));
+                        let clicked = 0;
+                        
+                        if (ide === 'antigravity') {
+                            // Antigravity: 使用更精确的选择器
+                            clicked = await performClick(['.bg-ide-button-background'], '#antigravity\\.agentPanel');
+                        } else {
+                            // Cursor: 使用原有的选择器
+                            clicked = await performClick(['button', '[class*="button"]', '[class*="anysphere"]'], '#workbench\\.parts\\.auxiliarybar');
+                        }
+                        
+                        // 智能间隔：连续没有点击时增加间隔
+                        if (clicked === 0) {
+                            noClickCount++;
+                        } else {
+                            noClickCount = 0; // 重置计数
+                        }
+                        
+                        let interval = baseInterval;
+                        if (noClickCount > 5) {
+                            // 连续5次没有点击，增加间隔
+                            interval = Math.min(baseInterval * Math.pow(1.5, noClickCount - 5), maxInterval);
+                            log(`[Poll] No clicks for ${noClickCount} cycles, increasing interval to ${interval}ms`);
+                        }
+                        
+                        await new Promise(r => setTimeout(r, interval));
                     }
                 })();
             }
