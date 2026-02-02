@@ -1,2 +1,5 @@
 .env
 *.vsix
+# WindsurfChatOpen
+.windsurfchatopen/
+.windsurfrules
