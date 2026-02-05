@@ -2,7 +2,7 @@
     "name": "auto-accept-agent",
     "displayName": "%ext.displayName%",
     "description": "%ext.description%",
-    "version": "8.9.6",
+    "version": "8.9.8",
     "publisher": "MunKhin",
     "icon": "media/icon.png",
     "extensionKind": [

@@ -236,7 +236,7 @@
 
     const queryAll = (selector, scopeSelector = null) => {
         const results = [];
-        
+
         if (scopeSelector) {
             // 限制搜索范围到指定的 panel
             try {
@@ -254,7 +254,7 @@
                 try { results.push(...Array.from(doc.querySelectorAll(selector))); } catch (e) { }
             });
         }
-        
+
         return results;
     };
 
@@ -1097,7 +1097,7 @@
             let clicked = 0;
             if (!hasBadge) {
                 // Click accept/run buttons (Antigravity specific selectors)
-                clicked = await performClick(['.bg-ide-button-background'], '#antigravity\\.agentPanel');
+                clicked = await performClick(['.bg-ide-button-background', 'button.cursor-pointer', '.bg-primary button'], '#antigravity\\.agentPanel');
                 log(`[Loop] Cycle ${cycle}: Clicked ${clicked} accept buttons`);
             } else {
                 log(`[Loop] Cycle ${cycle}: Skipping clicks - conversation is DONE (has badge)`);
@@ -1229,9 +1229,9 @@
             const lastStart = state.lastStartTime || 0;
             const now = Date.now();
             const recentThreshold = 3000; // 3 seconds
-            
-            if (state.isRunning && 
-                state.currentMode === ide && 
+
+            if (state.isRunning &&
+                state.currentMode === ide &&
                 state.isBackgroundMode === isBG &&
                 (now - lastStart) < recentThreshold) {
                 log(`Already running with same config recently, skipping`);
@@ -1277,32 +1277,32 @@
                     let noClickCount = 0;
                     const baseInterval = config.pollInterval || 1000;
                     const maxInterval = 5000; // 最大5秒间隔
-                    
+
                     while (state.isRunning && state.sessionID === sid) {
                         let clicked = 0;
-                        
+
                         if (ide === 'antigravity') {
                             // Antigravity: 使用更精确的选择器
-                            clicked = await performClick(['.bg-ide-button-background'], '#antigravity\\.agentPanel');
+                            clicked = await performClick(['.bg-ide-button-background', 'button.cursor-pointer', '.bg-primary button'], '#antigravity\\.agentPanel');
                         } else {
                             // Cursor: 使用原有的选择器
                             clicked = await performClick(['button', '[class*="button"]', '[class*="anysphere"]'], '#workbench\\.parts\\.auxiliarybar');
                         }
-                        
+
                         // 智能间隔：连续没有点击时增加间隔
                         if (clicked === 0) {
                             noClickCount++;
                         } else {
                             noClickCount = 0; // 重置计数
                         }
-                        
+
                         let interval = baseInterval;
                         if (noClickCount > 5) {
                             // 连续5次没有点击，增加间隔
                             interval = Math.min(baseInterval * Math.pow(1.5, noClickCount - 5), maxInterval);
                             log(`[Poll] No clicks for ${noClickCount} cycles, increasing interval to ${interval}ms`);
                         }
-                        
+
                         await new Promise(r => setTimeout(r, interval));
                     }
                 })();

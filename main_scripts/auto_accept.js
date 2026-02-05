@@ -17,7 +17,7 @@ export function autoAccept(buttons) {
     }
 
     if (buttons.includes("accept") || buttons.includes("retry")) {
-        targetSelectors.push(".bg-ide-button-background", "button")
+        targetSelectors.push(".bg-ide-button-background", "button.cursor-pointer", ".bg-primary button", "button")
         panelSelector = "#antigravity\\.agentPanel"
     }
 
