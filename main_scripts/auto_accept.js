@@ -51,7 +51,7 @@ function isAcceptButton(el) {
     ];
 
     // define the types that are not targetted
-    const REJECT_PATTERNS = ['skip', 'reject', 'cancel', 'discard', 'deny', 'close', 'refine', 'other'];
+    const REJECT_PATTERNS = ['skip', 'reject', 'cancel', 'discard', 'deny', 'close', 'refine', 'other', 'always'];
 
     if (!el || !el.textContent) return false;
 
