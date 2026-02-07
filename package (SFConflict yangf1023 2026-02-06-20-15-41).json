@@ -1,0 +1,93 @@
+{
+    "name": "auto-accept-agent",
+    "displayName": "%ext.displayName%",
+    "description": "%ext.description%",
+    "version": "8.9.9",
+    "publisher": "MunKhin",
+    "icon": "media/icon.png",
+    "extensionKind": [
+        "ui"
+    ],
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/MunKhin/auto-accept-agent"
+    },
+    "categories": [
+        "Machine Learning",
+        "Other"
+    ],
+    "keywords": [
+        "antigravity",
+        "ai",
+        "auto-accept"
+    ],
+    "scripts": {
+        "test": "node test/integration-test.js",
+        "compile": "esbuild extension.js --bundle --outfile=dist/extension.js --external:vscode --platform=node --format=cjs",
+        "vscode:prepublish": "npm run compile",
+        "package": "npx vsce package"
+    },
+    "engines": {
+        "vscode": "^1.75.0"
+    },
+    "activationEvents": [
+        "onStartupFinished"
+    ],
+    "main": "dist/extension.js",
+    "l10n": "./l10n",
+    "contributes": {
+        "commands": [
+            {
+                "command": "auto-accept.toggle",
+                "title": "%cmd.toggle%"
+            },
+            {
+                "command": "auto-accept.toggleBackground",
+                "title": "%cmd.toggleBackground%"
+            },
+            {
+                "command": "auto-accept.openSettings",
+                "title": "%cmd.openSettings%"
+            }
+        ],
+        "configuration": {
+            "title": "Auto Accept Agent",
+            "properties": {
+                "autoAccept.cdpPort": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "default": null,
+                    "description": "%config.cdpPort.description%"
+                },
+                "autoAccept.localVipOverride": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "%config.localVipOverride.description%"
+                },
+                "autoAccept.languageOverride": {
+                    "type": "string",
+                    "enum": [
+                        "auto",
+                        "en",
+                        "zh-cn"
+                    ],
+                    "default": "auto",
+                    "description": "%config.languageOverride.description%"
+                },
+                "autoAccept.autoAcceptFileEdits": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "%config.autoAcceptFileEdits.description%"
+                }
+            }
+        }
+    },
+    "dependencies": {
+        "ws": "^8.13.0"
+    },
+    "devDependencies": {
+        "esbuild": "^0.27.1"
+    }
+}

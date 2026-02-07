@@ -297,7 +297,66 @@
         }
     };
 
-    // --- 2. OVERLAY LOGIC ---
+    // --- 2a. SCROLL DETECTION & HANDLING ---
+    /**
+     * Check if "Step Requires Input" indicator is present in the panel.
+     * This indicates that there are pending approval buttons that may be hidden.
+     * @returns {boolean} True if the indicator is found
+     */
+    function hasStepRequiresInput() {
+        const allElements = queryAll('*');
+        return allElements.some(el => {
+            const text = (el.textContent || '').trim();
+            return text.includes('Step Requires Input') || text.includes('Requires Input');
+        });
+    }
+
+    /**
+     * Scroll the agent panel to the bottom to reveal hidden buttons.
+     * @param {string} panelSelector - CSS selector for the panel
+     * @returns {Promise<boolean>} True if scroll was successful
+     */
+    async function scrollPanelToBottom(panelSelector) {
+        try {
+            const panel = document.querySelector(panelSelector);
+            if (!panel) {
+                log('[Scroll] Panel not found');
+                return false;
+            }
+
+            // Find scrollable container within the panel
+            const scrollableCandidates = [
+                panel,
+                ...Array.from(panel.querySelectorAll('*')).filter(el => {
+                    const style = getComputedStyle(el);
+                    return (style.overflowY === 'auto' || style.overflowY === 'scroll')
+                        && el.scrollHeight > el.clientHeight;
+                })
+            ];
+
+            const scrollable = scrollableCandidates.find(el => el && el.scrollHeight > el.clientHeight);
+
+            if (!scrollable) {
+                log('[Scroll] No scrollable container found');
+                return false;
+            }
+
+            const beforeScroll = scrollable.scrollTop;
+            scrollable.scrollTop = scrollable.scrollHeight;
+
+            // Wait for scroll to complete
+            await new Promise(r => setTimeout(r, 200));
+
+            const afterScroll = scrollable.scrollTop;
+            log(`[Scroll] Scrolled panel: ${beforeScroll} → ${afterScroll}`);
+            return afterScroll > beforeScroll;
+        } catch (e) {
+            log(`[Scroll] Error: ${e.message}`);
+            return false;
+        }
+    }
+
+
     const OVERLAY_ID = '__autoAcceptBgOverlay';
     const STYLE_ID = '__autoAcceptBgStyles';
     const STYLES = `
@@ -1096,6 +1155,12 @@
             // Only click if there's NO completion badge (conversation is still working)
             let clicked = 0;
             if (!hasBadge) {
+                // Check if "Step Requires Input" is present - scroll panel to reveal hidden buttons
+                if (hasStepRequiresInput()) {
+                    log(`[Loop] Cycle ${cycle}: "Step Requires Input" detected, scrolling panel to bottom...`);
+                    await scrollPanelToBottom('#antigravity\\.agentPanel');
+                }
+
                 // Click accept/run buttons (Antigravity specific selectors)
                 clicked = await performClick(['.bg-ide-button-background', 'button.cursor-pointer', '.bg-primary button'], '#antigravity\\.agentPanel');
                 log(`[Loop] Cycle ${cycle}: Clicked ${clicked} accept buttons`);
@@ -1104,6 +1169,7 @@
             }
 
             await new Promise(r => setTimeout(r, 800));
+
 
             // Optional: click New Tab button to cycle
             const nt = queryAll("[data-tooltip-id='new-conversation-tooltip']")[0];
