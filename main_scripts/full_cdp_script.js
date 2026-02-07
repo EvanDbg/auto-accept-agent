@@ -787,6 +787,61 @@
     }
 
     /**
+     * Check if an element is an Accept-type button candidate (ignoring viewport visibility).
+     * Used for scroll-then-click logic to find buttons that may be hidden off-screen.
+     * @param {Element} el - Element to check
+     * @returns {boolean} True if element is an accept button candidate
+     */
+    function isAcceptButtonCandidate(el) {
+        const text = (el.textContent || "").trim().toLowerCase();
+        if (text.length === 0 || text.length > 50) return false;
+        const patterns = ['accept', 'run', 'retry', 'apply', 'execute', 'confirm', 'allow once', 'allow'];
+        const rejects = ['skip', 'reject', 'cancel', 'close', 'refine', 'always run'];
+        if (rejects.some(r => text.includes(r))) return false;
+        if (!patterns.some(p => text.includes(p))) return false;
+
+        // Check if this is a file edit button and user disabled auto-accept
+        const isFileEditButton = text.includes('accept all') || text.includes('accept file');
+        if (isFileEditButton) {
+            const state = window.__autoAcceptState;
+            if (state && state.autoAcceptFileEdits === false) return false;
+        }
+
+        // Check if command is banned
+        const isCommandButton = text.includes('run command') || text.includes('execute') || text.includes('run');
+        if (isCommandButton) {
+            const nearbyText = findNearbyCommandText(el);
+            if (isCommandBanned(nearbyText)) return false;
+        }
+
+        // Basic visibility checks (but NOT viewport check)
+        const style = window.getComputedStyle(el);
+        const rect = el.getBoundingClientRect();
+        if (style.display === 'none') return false;
+        if (style.visibility === 'hidden') return false;
+        if (parseFloat(style.opacity) === 0) return false;
+        if (style.pointerEvents === 'none') return false;
+        if (el.disabled) return false;
+        if (rect.width <= 0 || rect.height <= 0) return false;
+
+        return true;
+    }
+
+    /**
+     * Check if an element is in the viewport.
+     * @param {Element} el - Element to check
+     * @returns {boolean} True if element is in viewport
+     */
+    function isInViewport(el) {
+        const rect = el.getBoundingClientRect();
+        const viewportWidth = window.innerWidth || document.documentElement.clientWidth;
+        const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+        return rect.bottom > 0 && rect.top < viewportHeight &&
+            rect.right > 0 && rect.left < viewportWidth;
+    }
+
+
+    /**
      * Check if an element is still visible in the DOM.
      * @param {Element} el - Element to check
      * @returns {boolean} True if element is visible
@@ -973,8 +1028,26 @@
         let verified = 0;
         const uniqueFound = [...new Set(found)];
 
+        // First pass: scroll any hidden button candidates into view
+        for (const el of uniqueFound) {
+            if (isAcceptButtonCandidate(el) && !isInViewport(el)) {
+                const buttonText = (el.textContent || "").trim();
+                log(`[Scroll] Button "${buttonText.substring(0, 20)}" is outside viewport, scrolling into view...`);
+                el.scrollIntoView({ behavior: 'instant', block: 'center' });
+                await new Promise(r => setTimeout(r, 200));
+
+                if (isInViewport(el)) {
+                    log(`[Scroll] Button now visible in viewport`);
+                } else {
+                    log(`[Scroll] Button still not visible after scroll`);
+                }
+                break; // Only scroll one button per cycle
+            }
+        }
+
         for (const el of uniqueFound) {
             if (isAcceptButton(el)) {
+
                 const buttonText = (el.textContent || "").trim();
                 const lowerText = buttonText.toLowerCase();
                 let isRetryButton = false;
