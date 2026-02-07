@@ -356,6 +356,54 @@
         }
     }
 
+    /**
+     * Scroll down in any scrollable containers to reveal hidden buttons.
+     * This function searches all documents (including iframes) and scrolls
+     * any scrollable areas by a large increment to find buttons that may be
+     * below the current viewport.
+     * @returns {Promise<boolean>} True if any scrolling occurred
+     */
+    async function scrollPanelDown() {
+        try {
+            let scrolled = false;
+            const docs = getDocuments();
+
+            for (const doc of docs) {
+                // Find all scrollable containers
+                const scrollables = Array.from(doc.querySelectorAll('*')).filter(el => {
+                    const s = getComputedStyle(el);
+                    return (s.overflowY === 'auto' || s.overflowY === 'scroll')
+                        && el.scrollHeight > el.clientHeight + 100;
+                });
+
+                for (const sc of scrollables) {
+                    const before = sc.scrollTop;
+                    const maxScroll = sc.scrollHeight - sc.clientHeight;
+
+                    // Only scroll if not already at bottom
+                    if (before < maxScroll - 50) {
+                        // Scroll down by 500px or to bottom
+                        sc.scrollTop = Math.min(before + 500, maxScroll);
+                        await new Promise(r => setTimeout(r, 200));
+
+                        if (sc.scrollTop > before) {
+                            log(`[ScrollDown] Scrolled: ${before} → ${sc.scrollTop} (max: ${maxScroll})`);
+                            scrolled = true;
+                        }
+                    }
+                }
+            }
+
+            if (!scrolled) {
+                log('[ScrollDown] No scrollable areas or already at bottom');
+            }
+            return scrolled;
+        } catch (e) {
+            log(`[ScrollDown] Error: ${e.message}`);
+            return false;
+        }
+    }
+
 
     const OVERLAY_ID = '__autoAcceptBgOverlay';
     const STYLE_ID = '__autoAcceptBgStyles';
@@ -1237,7 +1285,14 @@
                 // Click accept/run buttons (Antigravity specific selectors)
                 clicked = await performClick(['.bg-ide-button-background', 'button.cursor-pointer', '.bg-primary button'], '#antigravity\\.agentPanel');
                 log(`[Loop] Cycle ${cycle}: Clicked ${clicked} accept buttons`);
+
+                // If "Step Requires Input" detected but no buttons clicked, scroll down to find hidden buttons
+                if (hasStepRequiresInput() && clicked === 0) {
+                    log(`[Loop] Cycle ${cycle}: Step Requires Input but no buttons - scrolling down to find hidden buttons...`);
+                    await scrollPanelDown();
+                }
             } else {
+
                 log(`[Loop] Cycle ${cycle}: Skipping clicks - conversation is DONE (has badge)`);
             }
 
