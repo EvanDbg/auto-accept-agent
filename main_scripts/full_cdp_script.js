@@ -446,8 +446,18 @@
                 for (const btn of expandButtons) {
                     const text = (btn.textContent || '').trim();
                     if (text === 'Expand' || text === 'Expand all') {
-                        const rect = btn.getBoundingClientRect();
+                        let rect = btn.getBoundingClientRect();
                         if (rect.width > 0 && rect.height > 0) {
+                            // Scroll button into view if not visible
+                            const vp = (doc.defaultView || window).innerHeight;
+                            if (rect.y < 0 || rect.y > vp) {
+                                log(`[Expand] "${text}" at y=${Math.round(rect.y)} is off-screen, scrolling...`);
+                                btn.scrollIntoView({ behavior: 'instant', block: 'center' });
+                                await new Promise(r => setTimeout(r, 200));
+                                rect = btn.getBoundingClientRect();
+                                log(`[Expand] After scroll: y=${Math.round(rect.y)}`);
+                            }
+
                             log(`[Expand] Clicking "${text}" at y=${Math.round(rect.y)}`);
                             btn.dispatchEvent(new MouseEvent('click', {
                                 view: doc.defaultView,
