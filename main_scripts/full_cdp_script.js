@@ -404,6 +404,75 @@
         }
     }
 
+    /**
+     * Click Expand buttons within the same panel that contains "Step Requires Input".
+     * This helps reveal hidden Run/Accept buttons that may be collapsed.
+     * @returns {Promise<number>} Number of Expand buttons clicked
+     */
+    async function clickExpandInStepPanel() {
+        try {
+            let clicked = 0;
+            const docs = getDocuments();
+
+            for (const doc of docs) {
+                // Find the element containing "Step Requires Input"
+                const allElements = doc.querySelectorAll('*');
+                let stepPanel = null;
+
+                for (const el of allElements) {
+                    const text = (el.textContent || '').trim();
+                    if (text.includes('Step Requires Input') || text.includes('Requires Input')) {
+                        // Walk up the DOM to find a reasonable container (not too small, not the whole document)
+                        let container = el;
+                        for (let i = 0; i < 10 && container.parentElement; i++) {
+                            container = container.parentElement;
+                            const rect = container.getBoundingClientRect();
+                            // Stop when we find a container that's reasonably sized
+                            if (rect.height > 200 && rect.height < 1000) {
+                                stepPanel = container;
+                                break;
+                            }
+                        }
+                        if (stepPanel) break;
+                    }
+                }
+
+                if (!stepPanel) continue;
+
+                log('[Expand] Found Step panel, searching for Expand buttons...');
+
+                // Find Expand buttons within the step panel
+                const expandButtons = stepPanel.querySelectorAll('button, [role="button"]');
+                for (const btn of expandButtons) {
+                    const text = (btn.textContent || '').trim();
+                    if (text === 'Expand' || text === 'Expand all') {
+                        const rect = btn.getBoundingClientRect();
+                        if (rect.width > 0 && rect.height > 0) {
+                            log(`[Expand] Clicking "${text}" at y=${Math.round(rect.y)}`);
+                            btn.dispatchEvent(new MouseEvent('click', {
+                                view: doc.defaultView,
+                                bubbles: true,
+                                cancelable: true
+                            }));
+                            clicked++;
+                            await new Promise(r => setTimeout(r, 200));
+                        }
+                    }
+                }
+            }
+
+            if (clicked === 0) {
+                log('[Expand] No Expand buttons found in Step panel');
+            } else {
+                log(`[Expand] Clicked ${clicked} Expand button(s)`);
+            }
+            return clicked;
+        } catch (e) {
+            log(`[Expand] Error: ${e.message}`);
+            return 0;
+        }
+    }
+
 
     const OVERLAY_ID = '__autoAcceptBgOverlay';
     const STYLE_ID = '__autoAcceptBgStyles';
@@ -1288,8 +1357,9 @@
 
                 // If "Step Requires Input" detected but no buttons clicked, scroll down to find hidden buttons
                 if (hasStepRequiresInput() && clicked === 0) {
-                    log(`[Loop] Cycle ${cycle}: Step Requires Input but no buttons - scrolling down to find hidden buttons...`);
+                    log(`[Loop] Cycle ${cycle}: Step Requires Input but no buttons - scrolling and expanding...`);
                     await scrollPanelDown();
+                    await clickExpandInStepPanel();
                 }
             } else {
 
