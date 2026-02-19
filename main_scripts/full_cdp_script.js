@@ -1029,9 +1029,10 @@
 
     // --- RETRY CIRCUIT BREAKER ---
     const MAX_CONSECUTIVE_RETRY_FAILURES = 5;
-    const RETRY_OBSERVATION_TIMEOUT = 10000; // 10 seconds to observe retry outcome
+    const RETRY_OBSERVATION_TIMEOUT = 15000; // 15 seconds to observe retry outcome
     let consecutiveRetryFailures = 0;
     let retryCircuitBroken = false;
+    let retryObservationInProgress = false; // Global lock to prevent duplicate retry clicks
 
     function resetRetryCircuit() {
         consecutiveRetryFailures = 0;
@@ -1054,7 +1055,7 @@
         }
     }
 
-    // Find the error container element that contains the retry button
+    // Find the error container element that contains the retry button (legacy, kept for reference)
     function findErrorContainer(retryButton) {
         // Look for common error container patterns
         let el = retryButton;
@@ -1075,6 +1076,35 @@
         return retryButton.parentElement?.parentElement || retryButton.parentElement;
     }
 
+    // Find the "Continue" text element in the conversation after clicking Retry.
+    // When Retry is clicked, a "Continue" message is sent into the conversation.
+    // We use this as the reference point to detect subsequent success/failure.
+    function findContinueReference() {
+        // Search across all documents (main + iframes) using getDocuments()
+        const docs = getDocuments();
+        let lastMatch = null;
+        let matchCount = 0;
+        let totalCandidates = 0;
+        for (const doc of docs) {
+            try {
+                const candidates = doc.querySelectorAll('p, span, div');
+                totalCandidates += candidates.length;
+                for (const el of candidates) {
+                    const directText = Array.from(el.childNodes)
+                        .filter(n => n.nodeType === Node.TEXT_NODE)
+                        .map(n => n.textContent.trim())
+                        .join('');
+                    if (directText.toLowerCase() === 'continue') {
+                        lastMatch = el;
+                        matchCount++;
+                    }
+                }
+            } catch (e) { }
+        }
+        log(`[findContinueRef] Scanned ${totalCandidates} candidates across ${docs.length} docs, found ${matchCount} 'Continue' matches. Using last match: ${lastMatch ? lastMatch.tagName : 'null'}`);
+        return lastMatch;
+    }
+
     // Check if elementA appears after elementB in DOM order
     function appearsAfterInDOM(elementA, elementB) {
         if (!elementA || !elementB) return false;
@@ -1083,90 +1113,184 @@
         return (position & Node.DOCUMENT_POSITION_PRECEDING) !== 0;
     }
 
-    // Detect success signal: "Thought for" text or task block appearing AFTER the error element
+    // Detect success signal: new AI response content appearing AFTER the reference element.
+    // The model first shows "Thinking" then "Thought for Xs", and also outputs
+    // prose content, search results, file analysis blocks, etc.
     function detectSuccessSignalAfter(referenceElement) {
-        // Look for "Thought for" text (indicating AI is thinking again)
-        const allElements = document.querySelectorAll('*');
-        for (const el of allElements) {
-            if (el.textContent?.includes('Thought for') && appearsAfterInDOM(el, referenceElement)) {
-                return { found: true, type: 'thought', element: el };
-            }
+        if (!referenceElement) {
+            log(`[detectSuccess] No reference element provided, skipping.`);
+            return { found: false };
         }
 
-        // Look for task blocks (code output, file changes, etc.)
-        const taskBlocks = document.querySelectorAll('[class*="task"], [class*="code-block"], [class*="diff"]');
-        for (const block of taskBlocks) {
-            if (appearsAfterInDOM(block, referenceElement)) {
-                return { found: true, type: 'task_block', element: block };
-            }
+        // Search across all documents (main + iframes)
+        const docs = getDocuments();
+
+        for (const doc of docs) {
+            try {
+                // 1. Look for "Thinking" or "Thought for" text (AI thinking indicator)
+                const spans = doc.querySelectorAll('span.cursor-pointer, span');
+                for (const el of spans) {
+                    const t = el.textContent?.trim() || '';
+                    if ((t === 'Thinking' || t.startsWith('Thought for')) && appearsAfterInDOM(el, referenceElement)) {
+                        log(`[detectSuccess] Found thinking span: "${t}", tag=${el.tagName}, class="${el.className}"`);
+                        return { found: true, type: 'thinking', element: el };
+                    }
+                }
+
+                // 2. Look for isolate blocks (contains the Thought for button)
+                const isolates = doc.querySelectorAll('.isolate');
+                for (const el of isolates) {
+                    if (appearsAfterInDOM(el, referenceElement)) {
+                        log(`[detectSuccess] Found isolate block after reference, innerHTML preview: "${el.innerHTML.substring(0, 100)}..."`);
+                        return { found: true, type: 'isolate_block', element: el };
+                    }
+                }
+
+                // 3. Look for animate-fade-in blocks (search results, file analysis, etc.)
+                const fadeIns = doc.querySelectorAll('.animate-fade-in');
+                for (const el of fadeIns) {
+                    if (appearsAfterInDOM(el, referenceElement)) {
+                        log(`[detectSuccess] Found animate-fade-in block after reference, text preview: "${(el.textContent || '').substring(0, 80)}..."`);
+                        return { found: true, type: 'fade_in_block', element: el };
+                    }
+                }
+
+                // 4. Look for prose blocks (actual text output from the model)
+                const proseBlocks = doc.querySelectorAll('[class*="prose"]');
+                for (const el of proseBlocks) {
+                    if (appearsAfterInDOM(el, referenceElement)) {
+                        log(`[detectSuccess] Found prose block after reference, text preview: "${(el.textContent || '').substring(0, 80)}..."`);
+                        return { found: true, type: 'prose_block', element: el };
+                    }
+                }
+
+                // 5. Look for any new flex-row content blocks after reference
+                const rows = doc.querySelectorAll('.flex.flex-row');
+                for (const el of rows) {
+                    if (el.querySelector('.min-w-0.grow') && appearsAfterInDOM(el, referenceElement)) {
+                        log(`[detectSuccess] Found content row after reference, text preview: "${(el.textContent || '').substring(0, 80)}..."`);
+                        return { found: true, type: 'content_row', element: el };
+                    }
+                }
+            } catch (e) { }
         }
 
+        log(`[detectSuccess] No success signal found.`);
         return { found: false };
     }
 
-    // Detect failure signal: new error appearing AFTER the original error position
-    function detectFailureSignalAfter(referenceElement, originalErrorText) {
-        // Look for error icons or error text
-        const errorIcons = document.querySelectorAll('svg[class*="error"], [class*="error-icon"]');
-        for (const icon of errorIcons) {
-            if (appearsAfterInDOM(icon, referenceElement)) {
-                return { found: true, type: 'error_icon', element: icon };
-            }
+    // Detect failure signal: check if the bottom Retry popup has reappeared.
+    // The error popup is shown at the bottom (not in the conversation), so we
+    // re-detect it by looking for a visible Retry button with nearby error text.
+    function detectFailureSignalAfter() {
+        const docs = getDocuments();
+        let retryBtnCount = 0;
+
+        for (const doc of docs) {
+            try {
+                const buttons = doc.querySelectorAll('button, .bg-ide-button-background');
+                for (const btn of buttons) {
+                    const text = (btn.textContent || '').trim().toLowerCase();
+                    if (text === 'retry' || text === 'try again') {
+                        retryBtnCount++;
+                        // Check visibility
+                        const rect = btn.getBoundingClientRect();
+                        if (rect.width <= 0 || rect.height <= 0) {
+                            log(`[detectFailure] Found retry btn "${text}" but invisible (size: ${rect.width}x${rect.height})`);
+                            continue;
+                        }
+                        const style = (btn.ownerDocument.defaultView || window).getComputedStyle(btn);
+                        if (style.display === 'none' || style.visibility === 'hidden') {
+                            log(`[detectFailure] Found retry btn "${text}" but hidden (display=${style.display}, visibility=${style.visibility})`);
+                            continue;
+                        }
+
+                        // Check if it has nearby error text (the popup)
+                        const hasError = findNearbyErrorText(btn);
+                        log(`[detectFailure] Visible retry btn "${text}" at (${Math.round(rect.left)},${Math.round(rect.top)}), nearbyError=${hasError}`);
+                        if (hasError) {
+                            return { found: true, type: 'retry_popup_reappeared', element: btn };
+                        }
+                    }
+                }
+            } catch (e) { }
         }
 
-        // Look for error text content
-        const allElements = document.querySelectorAll('*');
-        for (const el of allElements) {
-            const text = el.textContent || '';
-            // Check for new error messages (not the original one)
-            if ((text.includes('Error') || text.includes('terminated') || text.includes('failed'))
-                && text !== originalErrorText
-                && appearsAfterInDOM(el, referenceElement)
-                && el.offsetHeight > 0) {
-                return { found: true, type: 'error_text', element: el };
-            }
+        if (retryBtnCount > 0) {
+            log(`[detectFailure] Found ${retryBtnCount} retry buttons but none matched failure criteria`);
         }
-
         return { found: false };
     }
 
-    // Observe retry outcome by monitoring DOM changes
-    function observeRetryOutcome(errorContainer, originalErrorText) {
+    // Observe retry outcome by monitoring DOM changes.
+    // After clicking Retry, we wait for the "Continue" text to appear in the conversation,
+    // then watch for success signals (new AI output) or failure signals (Retry popup reappears).
+    function observeRetryOutcome() {
+        retryObservationInProgress = true;
         return new Promise((resolve) => {
             const startTime = Date.now();
             let resolved = false;
+            let referenceElement = null;
+            const CONTINUE_SEARCH_DELAY = 2000; // wait 2s before looking for Continue text
+
+            log(`[RetryObserver] Observation started. timeout=${RETRY_OBSERVATION_TIMEOUT}ms, continueDelay=${CONTINUE_SEARCH_DELAY}ms`);
+            let checkCount = 0;
+
+            const finish = (result) => {
+                resolved = true;
+                clearInterval(checkInterval);
+                retryObservationInProgress = false;
+                resolve(result);
+            };
 
             const checkInterval = setInterval(() => {
                 if (resolved) return;
+                checkCount++;
 
                 const elapsed = Date.now() - startTime;
 
-                // Check for success signal
-                const success = detectSuccessSignalAfter(errorContainer);
-                if (success.found) {
-                    resolved = true;
-                    clearInterval(checkInterval);
-                    log(`[RetryObserver] Success detected: ${success.type}`);
-                    resolve({ success: true, reason: success.type });
-                    return;
+                // Phase 1: Wait a bit then find the "Continue" reference element
+                if (!referenceElement && elapsed >= CONTINUE_SEARCH_DELAY) {
+                    log(`[RetryObserver] Check #${checkCount} (${elapsed}ms): Searching for 'Continue' reference...`);
+                    referenceElement = findContinueReference();
+                    if (referenceElement) {
+                        log(`[RetryObserver] Found 'Continue' reference element: tag=${referenceElement.tagName}, text="${referenceElement.textContent?.substring(0, 50)}"`);
+                    } else {
+                        log(`[RetryObserver] 'Continue' reference not found yet at ${elapsed}ms, will keep trying...`);
+                    }
                 }
 
-                // Check for failure signal
-                const failure = detectFailureSignalAfter(errorContainer, originalErrorText);
-                if (failure.found) {
-                    resolved = true;
-                    clearInterval(checkInterval);
-                    log(`[RetryObserver] Failure detected: ${failure.type}`);
-                    resolve({ success: false, reason: failure.type });
-                    return;
+                // Phase 2: Once we have a reference, check for success/failure
+                if (referenceElement) {
+                    // Check for success signal
+                    const success = detectSuccessSignalAfter(referenceElement);
+                    if (success.found) {
+                        log(`[RetryObserver] ✓ Success detected at ${elapsed}ms (check #${checkCount}): ${success.type}`);
+                        finish({ success: true, reason: success.type });
+                        return;
+                    }
+                }
+
+                // Check for failure signal (Retry popup reappeared at bottom)
+                // Only check after some delay to avoid detecting the original popup
+                if (elapsed >= 3000) {
+                    const failure = detectFailureSignalAfter();
+                    if (failure.found) {
+                        log(`[RetryObserver] ✗ Failure detected at ${elapsed}ms (check #${checkCount}): ${failure.type}`);
+                        finish({ success: false, reason: failure.type });
+                        return;
+                    }
+                }
+
+                // Log periodic status every 5 checks (~2.5s)
+                if (checkCount % 5 === 0) {
+                    log(`[RetryObserver] Status at ${elapsed}ms (check #${checkCount}): ref=${referenceElement ? 'found' : 'searching'}, no signal yet`);
                 }
 
                 // Timeout - assume success if no failure signal (button click may have worked)
                 if (elapsed >= RETRY_OBSERVATION_TIMEOUT) {
-                    resolved = true;
-                    clearInterval(checkInterval);
-                    log(`[RetryObserver] Timeout reached, no clear signal. Assuming success.`);
-                    resolve({ success: true, reason: 'timeout_no_failure' });
+                    log(`[RetryObserver] ⏱ Timeout reached at ${elapsed}ms (${RETRY_OBSERVATION_TIMEOUT / 1000}s, ${checkCount} checks), ref=${referenceElement ? 'found' : 'NOT_FOUND'}. Assuming success.`);
+                    finish({ success: true, reason: 'timeout_no_failure' });
                 }
             }, 500); // Check every 500ms
         });
@@ -1215,24 +1339,33 @@
 
                     const nearbyError = findNearbyErrorText(el);
                     if (nearbyError) {
+                        // Check global lock - skip if another retry is already being handled
+                        if (retryObservationInProgress) {
+                            log(`[Retry] Skipping - another retry handling is already in progress.`);
+                            continue;
+                        }
+
+                        // Acquire lock IMMEDIATELY before delay to prevent duplicate clicks
+                        retryObservationInProgress = true;
+                        log(`[Retry] Lock acquired. Detected Antigravity error dialog.`);
+
                         // It's the "Agent terminated due to error" dialog
                         const delay = Math.floor(Math.random() * 3000) + 2000; // 2000ms to 5000ms
-                        log(`[Retry] Detected Antigravity error dialog. Waiting ${delay}ms to simulate human reaction...`);
+                        log(`[Retry] Waiting ${delay}ms to simulate human reaction...`);
                         await new Promise(r => setTimeout(r, delay));
-                        log(`[Retry] Delay finished. Clicking now.`);
 
-                        // Find error container and record original state BEFORE clicking
-                        const errorContainer = findErrorContainer(el);
-                        const originalErrorText = errorContainer?.textContent || '';
-                        log(`[Retry] Error container found. Original text length: ${originalErrorText.length}`);
+                        // Re-check lock ownership after delay (in case session was reset)
+                        log(`[Retry] Delay finished. Clicking now.`);
 
                         log(`Clicking: "${buttonText}"`);
                         el.dispatchEvent(new MouseEvent('click', { view: window, bubbles: true, cancelable: true }));
                         clicked++;
 
                         // Use intelligent DOM observation instead of simple disappear check
+                        // After clicking Retry, a "Continue" message is sent into the conversation.
+                        // We observe for success (new AI output after Continue) or failure (Retry popup reappears).
                         log(`[RetryObserver] Starting observation for retry outcome...`);
-                        const outcome = await observeRetryOutcome(errorContainer, originalErrorText);
+                        const outcome = await observeRetryOutcome();
 
                         if (outcome.success) {
                             Analytics.trackClick(buttonText, log);
