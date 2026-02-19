@@ -272,6 +272,15 @@
         return results;
     };
 
+    // Helper: find the Antigravity agent panel (compatible with old and new panel IDs)
+    function getAgentPanelSelector() {
+        const candidates = ['#antigravity\\.agentPanel', '#antigravity\\.agentViewContainerId'];
+        for (const sel of candidates) {
+            try { if (document.querySelector(sel)) return sel; } catch (e) { }
+        }
+        return null; // no panel found, will fall back to global scan
+    }
+
     // Helper to strip time suffixes like "3m", "4h", "12s"
     const stripTimeSuffix = (text) => {
         return (text || '').trim().replace(/\s*\d+[smh]$/, '').trim();
@@ -550,7 +559,8 @@
         const ide = state.currentMode || 'cursor';
         let panel = null;
         if (ide === 'antigravity') {
-            panel = queryAll('#antigravity\\.agentPanel').find(p => p.offsetWidth > 50);
+            const panelSel = getAgentPanelSelector();
+            if (panelSel) panel = queryAll(panelSel).find(p => p.offsetWidth > 50);
         } else {
             panel = queryAll('#workbench\\.parts\\.auxiliarybar').find(p => p.offsetWidth > 50);
         }
@@ -1382,42 +1392,47 @@
                     }
 
                     // STEP 2: Scroll panel to reveal any hidden buttons
-                    await scrollPanelToBottom('#antigravity\\.agentPanel');
-                    await new Promise(r => setTimeout(r, 200));
+                    const loopPanelSel = getAgentPanelSelector();
+                    if (loopPanelSel) {
+                        await scrollPanelToBottom(loopPanelSel);
+                        await new Promise(r => setTimeout(r, 200));
+                    }
                 }
 
                 // Click accept/run buttons (Antigravity specific selectors) - scoped to agent panel
-                clicked = await performClick(['.bg-ide-button-background', 'button.cursor-pointer', '.bg-primary button'], '#antigravity\\.agentPanel');
+                const clickPanelSel = getAgentPanelSelector();
+                clicked = await performClick(['.bg-ide-button-background', 'button.cursor-pointer', '.bg-primary button'], clickPanelSel);
                 log(`[Loop] Cycle ${cycle}: Clicked ${clicked} accept buttons (panel-scoped)`);
-
-                // NEW: Also scan globally for file-edit buttons (Accept all / Accept Changes)
-                // These may live OUTSIDE the agent panel (e.g., in the diff review area)
-                if (clicked === 0) {
-                    const globalClicked = await performClick(['.bg-ide-button-background', 'button.keep-changes', '[class*="bg-ide-button"]'], null);
-                    if (globalClicked > 0) {
-                        clicked += globalClicked;
-                        log(`[Loop] Cycle ${cycle}: Clicked ${globalClicked} file-edit button(s) (global scan)`);
-                    }
-                }
 
                 // If still no buttons found after expand, try scrolling down more
                 if (hasStepInput && clicked === 0) {
                     log(`[Loop] Cycle ${cycle}: Step Requires Input but still no buttons - trying more scroll...`);
                     await scrollPanelDown();
                     await new Promise(r => setTimeout(r, 300));
-                    // Try clicking buttons again after scroll
-                    clicked = await performClick(['.bg-ide-button-background', 'button.cursor-pointer', '.bg-primary button'], '#antigravity\\.agentPanel');
+                    clicked = await performClick(['.bg-ide-button-background', 'button.cursor-pointer', '.bg-primary button'], clickPanelSel);
                     if (clicked > 0) {
                         log(`[Loop] Cycle ${cycle}: After scroll, clicked ${clicked} button(s)`);
                     }
                 }
             } else {
+                log(`[Loop] Cycle ${cycle}: Skipping run/accept clicks - conversation is DONE (has badge)`);
+            }
 
-                log(`[Loop] Cycle ${cycle}: Skipping clicks - conversation is DONE (has badge)`);
+            // ALWAYS scan for file-edit buttons (Accept all / Accept Changes)
+            // These must be clicked regardless of conversation completion state (hasBadge)
+            // because file edits can appear even after the AI finishes its response
+            {
+                const fileEditClicked = await performClick(
+                    ['.bg-ide-button-background', 'button.keep-changes', '[class*="bg-ide-button"]'],
+                    null  // global scan, not scoped to panel
+                );
+                if (fileEditClicked > 0) {
+                    clicked += fileEditClicked;
+                    log(`[Loop] Cycle ${cycle}: Clicked ${fileEditClicked} file-edit button(s) (global, badge-independent)`);
+                }
             }
 
             await new Promise(r => setTimeout(r, 800));
-
 
             // Optional: click New Tab button to cycle
             const nt = queryAll("[data-tooltip-id='new-conversation-tooltip']")[0];
@@ -1597,7 +1612,7 @@
 
                         if (ide === 'antigravity') {
                             // Antigravity: 使用更精确的选择器
-                            clicked = await performClick(['.bg-ide-button-background', 'button.cursor-pointer', '.bg-primary button'], '#antigravity\\.agentPanel');
+                            clicked = await performClick(['.bg-ide-button-background', 'button.cursor-pointer', '.bg-primary button'], getAgentPanelSelector());
                         } else {
                             // Cursor: 使用原有的选择器
                             clicked = await performClick(['button', '[class*="button"]', '[class*="anysphere"]'], '#workbench\\.parts\\.auxiliarybar');
