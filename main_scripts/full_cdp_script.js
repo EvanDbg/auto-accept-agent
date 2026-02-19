@@ -1618,6 +1618,19 @@
                             clicked = await performClick(['button', '[class*="button"]', '[class*="anysphere"]'], '#workbench\\.parts\\.auxiliarybar');
                         }
 
+                        // ALWAYS scan for file-edit buttons globally (Accept all / Accept Changes)
+                        // These buttons appear in the diff editor area, outside the agent panel
+                        {
+                            const fileEditClicked = await performClick(
+                                ['.bg-ide-button-background', 'button.keep-changes', '[class*="bg-ide-button"]'],
+                                null  // global scan, not scoped to panel
+                            );
+                            if (fileEditClicked > 0) {
+                                clicked += fileEditClicked;
+                                log(`[StaticPoll] Clicked ${fileEditClicked} file-edit button(s) (global scan)`);
+                            }
+                        }
+
                         // 智能间隔：连续没有点击时增加间隔
                         if (clicked === 0) {
                             noClickCount++;
