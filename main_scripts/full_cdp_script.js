@@ -242,12 +242,26 @@
             try {
                 const scopeElement = document.querySelector(scopeSelector);
                 if (scopeElement) {
-                    // 只在指定范围内搜索
+                    // Try contentDocument first (for iframe-based panels)
                     const scopeDoc = scopeElement.contentDocument || scopeElement.contentWindow?.document;
-                    const scopedResults = scopeDoc.querySelectorAll(selector);
-                    results.push(...Array.from(scopedResults));
+                    if (scopeDoc) {
+                        const scopedResults = scopeDoc.querySelectorAll(selector);
+                        results.push(...Array.from(scopedResults));
+                    } else {
+                        // Fallback: search within the element itself (for regular div panels)
+                        const scopedResults = scopeElement.querySelectorAll(selector);
+                        results.push(...Array.from(scopedResults));
+                    }
                 }
-            } catch (e) { }
+            } catch (e) {
+                // Fallback on error: try direct querySelectorAll on the scope element
+                try {
+                    const scopeElement = document.querySelector(scopeSelector);
+                    if (scopeElement) {
+                        results.push(...Array.from(scopeElement.querySelectorAll(selector)));
+                    }
+                } catch (e2) { }
+            }
         } else {
             // 原有逻辑：搜索所有文档
             getDocuments().forEach(doc => {
@@ -861,14 +875,14 @@
     function isAcceptButton(el) {
         const text = (el.textContent || "").trim().toLowerCase();
         if (text.length === 0 || text.length > 50) return false;
-        const patterns = ['accept', 'run', 'retry', 'apply', 'execute', 'confirm', 'allow once', 'allow'];
+        const patterns = ['accept', 'run', 'retry', 'apply', 'execute', 'confirm', 'allow once', 'allow', 'accept changes'];
         const rejects = ['skip', 'reject', 'cancel', 'close', 'refine', 'always run'];
         if (rejects.some(r => text.includes(r))) return false;
         if (!patterns.some(p => text.includes(p))) return false;
 
         // NEW: Check if this is a file edit button (Accept All) and user disabled auto-accept
         // IMPORTANT: Only match explicit "accept all" text, NOT generic "accept" (used for terminal commands)
-        const isFileEditButton = text.includes('accept all') || text.includes('accept file');
+        const isFileEditButton = text.includes('accept all') || text.includes('accept file') || text.includes('accept changes');
         if (isFileEditButton) {
             const state = window.__autoAcceptState;
             if (state && state.autoAcceptFileEdits === false) {
@@ -922,13 +936,13 @@
     function isAcceptButtonCandidate(el) {
         const text = (el.textContent || "").trim().toLowerCase();
         if (text.length === 0 || text.length > 50) return false;
-        const patterns = ['accept', 'run', 'retry', 'apply', 'execute', 'confirm', 'allow once', 'allow'];
+        const patterns = ['accept', 'run', 'retry', 'apply', 'execute', 'confirm', 'allow once', 'allow', 'accept changes'];
         const rejects = ['skip', 'reject', 'cancel', 'close', 'refine', 'always run'];
         if (rejects.some(r => text.includes(r))) return false;
         if (!patterns.some(p => text.includes(p))) return false;
 
         // Check if this is a file edit button and user disabled auto-accept
-        const isFileEditButton = text.includes('accept all') || text.includes('accept file');
+        const isFileEditButton = text.includes('accept all') || text.includes('accept file') || text.includes('accept changes');
         if (isFileEditButton) {
             const state = window.__autoAcceptState;
             if (state && state.autoAcceptFileEdits === false) return false;
@@ -1355,21 +1369,47 @@
             // Only click if there's NO completion badge (conversation is still working)
             let clicked = 0;
             if (!hasBadge) {
-                // Check if "Step Requires Input" is present - scroll panel to reveal hidden buttons
-                if (hasStepRequiresInput()) {
-                    log(`[Loop] Cycle ${cycle}: "Step Requires Input" detected, scrolling panel to bottom...`);
+                // Check if "Step Requires Input" is present
+                const hasStepInput = hasStepRequiresInput();
+                if (hasStepInput) {
+                    log(`[Loop] Cycle ${cycle}: "Step Requires Input" detected`);
+
+                    // STEP 1: First, try to click Expand buttons to reveal hidden Run buttons
+                    const expandClicked = await clickExpandInStepPanel();
+                    if (expandClicked > 0) {
+                        log(`[Loop] Cycle ${cycle}: Clicked ${expandClicked} Expand button(s), waiting for UI...`);
+                        await new Promise(r => setTimeout(r, 500)); // Wait for UI to render
+                    }
+
+                    // STEP 2: Scroll panel to reveal any hidden buttons
                     await scrollPanelToBottom('#antigravity\\.agentPanel');
+                    await new Promise(r => setTimeout(r, 200));
                 }
 
-                // Click accept/run buttons (Antigravity specific selectors)
+                // Click accept/run buttons (Antigravity specific selectors) - scoped to agent panel
                 clicked = await performClick(['.bg-ide-button-background', 'button.cursor-pointer', '.bg-primary button'], '#antigravity\\.agentPanel');
-                log(`[Loop] Cycle ${cycle}: Clicked ${clicked} accept buttons`);
+                log(`[Loop] Cycle ${cycle}: Clicked ${clicked} accept buttons (panel-scoped)`);
 
-                // If "Step Requires Input" detected but no buttons clicked, scroll down to find hidden buttons
-                if (hasStepRequiresInput() && clicked === 0) {
-                    log(`[Loop] Cycle ${cycle}: Step Requires Input but no buttons - scrolling and expanding...`);
+                // NEW: Also scan globally for file-edit buttons (Accept all / Accept Changes)
+                // These may live OUTSIDE the agent panel (e.g., in the diff review area)
+                if (clicked === 0) {
+                    const globalClicked = await performClick(['.bg-ide-button-background', 'button.keep-changes', '[class*="bg-ide-button"]'], null);
+                    if (globalClicked > 0) {
+                        clicked += globalClicked;
+                        log(`[Loop] Cycle ${cycle}: Clicked ${globalClicked} file-edit button(s) (global scan)`);
+                    }
+                }
+
+                // If still no buttons found after expand, try scrolling down more
+                if (hasStepInput && clicked === 0) {
+                    log(`[Loop] Cycle ${cycle}: Step Requires Input but still no buttons - trying more scroll...`);
                     await scrollPanelDown();
-                    await clickExpandInStepPanel();
+                    await new Promise(r => setTimeout(r, 300));
+                    // Try clicking buttons again after scroll
+                    clicked = await performClick(['.bg-ide-button-background', 'button.cursor-pointer', '.bg-primary button'], '#antigravity\\.agentPanel');
+                    if (clicked > 0) {
+                        log(`[Loop] Cycle ${cycle}: After scroll, clicked ${clicked} button(s)`);
+                    }
                 }
             } else {
 
